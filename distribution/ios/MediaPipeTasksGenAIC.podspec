@@ -9,14 +9,20 @@ Pod::Spec.new do |spec|
   spec.platform = :ios, "15.0"
 
   tag = ENV.fetch("POD_RELEASE_TAG", "eyespie-ios-v0.10.26.1")
+  base_url = ENV["POD_SOURCE_BASE_URL"]
+  archive = "MediaPipeTasksGenAIC-#{spec.version}.tar.gz"
   spec.source = {
-    :http => "https://github.com/ryjen/mediapipe/releases/download/#{tag}/MediaPipeTasksGenAIC-#{spec.version}.tar.gz"
+    :http => base_url ? "#{base_url}/#{archive}" : "https://github.com/ryjen/mediapipe/releases/download/#{tag}/#{archive}"
   }
 
   spec.vendored_frameworks = "frameworks/MediaPipeTasksGenAIC.xcframework"
-  spec.vendored_libraries = "frameworks/genai_libraries/*.a"
+  spec.preserve_paths = "frameworks/genai_libraries/*.a"
   spec.libraries = "c++"
   spec.pod_target_xcconfig = {
     "CLANG_CXX_LANGUAGE_STANDARD" => "c++17"
+  }
+  spec.user_target_xcconfig = {
+    "OTHER_LDFLAGS[sdk=iphoneos*]" => "$(inherited) -force_load \"${PODS_TARGET_SRCROOT}/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a\"",
+    "OTHER_LDFLAGS[sdk=iphonesimulator*]" => "$(inherited) -force_load \"${PODS_TARGET_SRCROOT}/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a\""
   }
 end
