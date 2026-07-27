@@ -10,7 +10,7 @@ diff -ruN a/contrib/minizip/ioapi.h b/contrib/minizip/ioapi.h
  
    // Linux needs this to support file operation on files larger then 4+GB
    // But might need better if/def to select just the platforms that needs them.
-diff -ruN a/contrib/minizip/miniunz.c b/contrib/minizip/miniunz.c
+ diff -ruN a/contrib/minizip/miniunz.c b/contrib/minizip/miniunz.c
 --- a/contrib/minizip/miniunz.c
 +++ b/contrib/minizip/miniunz.c
 @@ -12,7 +12,7 @@
@@ -39,7 +39,7 @@ diff -ruN a/contrib/minizip/miniunz.c b/contrib/minizip/miniunz.c
  # include <unistd.h>
  # include <utime.h>
  #endif
-diff -ruN a/contrib/minizip/minizip.c b/contrib/minizip/minizip.c
+ diff -ruN a/contrib/minizip/minizip.c b/contrib/minizip/minizip.c
 --- a/contrib/minizip/minizip.c
 +++ b/contrib/minizip/minizip.c
 @@ -13,7 +13,7 @@
@@ -60,3 +60,25 @@ diff -ruN a/contrib/minizip/minizip.c b/contrib/minizip/minizip.c
  // In darwin and perhaps other BSD variants off_t is a 64 bit value, hence no need for specific 64 bit functions
  #define FOPEN_FUNC(filename, mode) fopen(filename, mode)
  #define FTELLO_FUNC(stream) ftello(stream)
+diff -ruN a/zutil.h b/zutil.h
+--- a/zutil.h
++++ b/zutil.h
+@@ -138,17 +138,7 @@
+ #  endif
+ #endif
+ 
+-#if defined(MACOS) || defined(TARGET_OS_MAC)
++#if defined(MACOS)
+ #  define OS_CODE  7
+-#  ifndef Z_SOLO
+-#    if defined(__MWERKS__) && __dest_os != __be_os && __dest_os != __win32_os
+-#      include <unix.h> /* for fdopen */
+-#    else
+-#      ifndef fdopen
+-#        define fdopen(fd,mode) NULL /* No fdopen() */
+-#      endif
+-#    endif
+-#  endif
+ #endif
+ 
+ #ifdef __acorn
