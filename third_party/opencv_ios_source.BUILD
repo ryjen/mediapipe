@@ -27,9 +27,9 @@ exports_files(["LICENSE"])
 # an iOS project.
 #
 # OpenCV 4.5.3's iOS script predates modern CMake/Xcode cross-compilation
-# behavior. Patch an isolated source copy so CheckTypeSize probes compile as
-# static libraries instead of attempting to produce an iOS executable inside
-# Bazel's sandbox. The unique -GXcode line is the fail-closed insertion point.
+# behavior, and its bundled zlib predates current Apple SDK headers. Patch an
+# isolated source copy so CheckTypeSize probes compile as static libraries and
+# zlib does not redefine fdopen on Apple targets. Both edits fail closed.
 genrule(
     name = "build_opencv_xcframework",
     srcs = glob(["opencv-4.5.3/**"]),
@@ -41,19 +41,28 @@ patched_parent="$$(mktemp -d "$${TMPDIR:-/tmp}/opencv-4.5.3.XXXXXX")"
 trap 'rm -rf "$$patched_parent"' EXIT
 cp -R "$$source_root" "$$patched_parent/opencv-4.5.3"
 chmod -R u+w "$$patched_parent/opencv-4.5.3"
-python3 - "$$patched_parent/opencv-4.5.3/platforms/ios/build_framework.py" <<'PY'
+python3 - \
+  "$$patched_parent/opencv-4.5.3/platforms/ios/build_framework.py" \
+  "$$patched_parent/opencv-4.5.3/3rdparty/zlib/zutil.h" <<'PY'
 from pathlib import Path
 import sys
 
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
+build_script = Path(sys.argv[1])
+text = build_script.read_text(encoding="utf-8")
 lines = text.splitlines(keepends=True)
 matches = [index for index, line in enumerate(lines) if line.strip() == '"-GXcode",']
 if len(matches) != 1:
     raise SystemExit("OpenCV iOS -GXcode argument is not unique")
 index = matches[0]
 lines.insert(index + 1, lines[index].replace("-GXcode", "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"))
-path.write_text("".join(lines), encoding="utf-8")
+build_script.write_text("".join(lines), encoding="utf-8")
+
+zutil = Path(sys.argv[2])
+zutil_text = zutil.read_text(encoding="utf-8")
+old_condition = "#if defined(MACOS) || defined(TARGET_OS_MAC)"
+if zutil_text.count(old_condition) != 1:
+    raise SystemExit("OpenCV bundled zlib Apple condition no longer matches")
+zutil.write_text(zutil_text.replace(old_condition, "#if defined(MACOS)"), encoding="utf-8")
 PY
 "$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
   --iphonesimulator_archs arm64,x86_64 \
