@@ -25,37 +25,65 @@ exports_files(["LICENSE"])
 # for MediaPipe iOS Task libraries are built. Shipping with OPENCV built with
 # Swift support throws linker errors when the MediaPipe framework is used from
 # an iOS project.
-# When building on M1 Macs, cmake version cannot be higher than 3.24.0. This is
-# is mentioned in an open issue in the opencv github repo.
+#
+# OpenCV 4.5.3's iOS script predates modern CMake/Xcode cross-compilation
+# behavior. Patch an isolated source copy so CheckTypeSize probes compile as
+# static libraries instead of attempting to produce an iOS executable inside
+# Bazel's sandbox. The exact-match assertion fails closed if upstream changes.
 genrule(
     name = "build_opencv_xcframework",
     srcs = glob(["opencv-4.5.3/**"]),
     outs = ["opencv2.xcframework.zip"],
-    cmd = "&&".join([
-        "$(location opencv-4.5.3/platforms/apple/build_xcframework.py) \
-        --iphonesimulator_archs arm64,x86_64 \
-        --iphoneos_archs arm64 \
-        --without dnn \
-        --without ml \
-        --without stitching \
-        --without photo \
-        --without objdetect \
-        --without gapi \
-        --without flann \
-        --without highgui \
-        --without videoio \
-        --disable PROTOBUF \
-        --disable-bitcode \
-        --disable-swift \
-        --build_only_specified_archs \
-        --out $(@D)",
-        "cd $(@D)",
-        "zip --symlinks -r opencv2.xcframework.zip opencv2.xcframework",
-    ]),
+    cmd = """
+set -euo pipefail
+source_root="$$(cd "$$(dirname "$(location opencv-4.5.3/platforms/apple/build_xcframework.py)")/../.." && pwd)"
+patched_parent="$$(mktemp -d "$${TMPDIR:-/tmp}/opencv-4.5.3.XXXXXX")"
+trap 'rm -rf "$$patched_parent"' EXIT
+cp -R "$$source_root" "$$patched_parent/opencv-4.5.3"
+chmod -R u+w "$$patched_parent/opencv-4.5.3"
+python3 - "$$patched_parent/opencv-4.5.3/platforms/ios/build_framework.py" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+old = '''        args = [
+            "cmake",
+            "-GXcode",
+            "-DAPPLE_FRAMEWORK=ON",'''
+new = '''        args = [
+            "cmake",
+            "-GXcode",
+            "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
+            "-DAPPLE_FRAMEWORK=ON",'''
+text = path.read_text(encoding="utf-8")
+if text.count(old) != 1:
+    raise SystemExit("OpenCV iOS CMake argument block no longer matches 4.5.3")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+"$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
+  --iphonesimulator_archs arm64,x86_64 \
+  --iphoneos_archs arm64 \
+  --without dnn \
+  --without ml \
+  --without stitching \
+  --without photo \
+  --without objdetect \
+  --without gapi \
+  --without flann \
+  --without highgui \
+  --without videoio \
+  --disable PROTOBUF \
+  --disable-bitcode \
+  --disable-swift \
+  --build_only_specified_archs \
+  --out "$(@D)"
+cd "$(@D)"
+zip --symlinks -r opencv2.xcframework.zip opencv2.xcframework
+""",
 )
 
 # Unzips `opencv2.xcframework.zip` built from source by `build_opencv_xcframework`
-# genrule and returns an exhaustive list of all its files including symlinks.
+# genrule and returns an exhaustive list of its files including symlinks.
 unzip_opencv_xcframework(
     name = "opencv2_unzipped_xcframework_files",
     zip_file = "opencv2.xcframework.zip",
@@ -69,8 +97,7 @@ apple_static_xcframework_import(
     xcframework_imports = [":opencv2_unzipped_xcframework_files"],
 )
 
-# Filters the headers for each platform in `opencv2.xcframework` which will be
-# used as headers in a `cc_library` that can be linked to C++ targets.
+# Filters the headers for each platform in `opencv2.xcframework` which will be used as headers in a `cc_library` that can be linked to C++ targets.
 select_headers(
     name = "opencv_xcframework_device_headers",
     srcs = [":opencv_xcframework"],
