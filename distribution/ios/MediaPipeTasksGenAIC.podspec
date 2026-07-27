@@ -1,12 +1,14 @@
 Pod::Spec.new do |spec|
   spec.name = "EyespieMediaPipeTasksGenAIC"
-  spec.module_name = "MediaPipeTasksGenAIC"
   spec.version = ENV.fetch("POD_VERSION", "0.10.26.1")
-  spec.summary = "MediaPipe Tasks GenAI C runtime built from upstream v0.10.26"
+  spec.authors = "Google Inc."
+  spec.license = { :type => "Apache", :file => "LICENSE" }
   spec.homepage = "https://github.com/ryjen/mediapipe"
-  spec.license = { :type => "Apache-2.0", :file => "LICENSE" }
-  spec.authors = { "MediaPipe Authors" => "mediapipe@google.com" }
-  spec.platform = :ios, "15.0"
+  spec.summary = "MediaPipe Task Library - Gen AI C API"
+  spec.description = "The Gen AI C APIs of the MediaPipe Task Library, built from upstream v0.10.26."
+  spec.ios.deployment_target = "15.0"
+  spec.module_name = "MediaPipeTasksGenAIC"
+  spec.static_framework = true
 
   tag = ENV.fetch("POD_RELEASE_TAG", "eyespie-ios-v0.10.26.1")
   base_url = ENV["POD_SOURCE_BASE_URL"]
@@ -15,14 +17,12 @@ Pod::Spec.new do |spec|
     :http => base_url ? "#{base_url}/#{archive}" : "https://github.com/ryjen/mediapipe/releases/download/#{tag}/#{archive}"
   }
 
-  spec.vendored_frameworks = "frameworks/MediaPipeTasksGenAIC.xcframework"
-  spec.preserve_paths = "frameworks/genai_libraries/*.a"
-  spec.libraries = "c++"
-  spec.pod_target_xcconfig = {
-    "CLANG_CXX_LANGUAGE_STANDARD" => "c++17"
-  }
   spec.user_target_xcconfig = {
-    "OTHER_LDFLAGS[sdk=iphoneos*]" => "$(inherited) -force_load \"${PODS_TARGET_SRCROOT}/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a\"",
-    "OTHER_LDFLAGS[sdk=iphonesimulator*]" => "$(inherited) -force_load \"${PODS_TARGET_SRCROOT}/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a\""
+    "OTHER_LDFLAGS[sdk=iphonesimulator*]" => "$(inherited) -force_load \"$(PODS_ROOT)/EyespieMediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a\"",
+    "OTHER_LDFLAGS[sdk=iphoneos*]" => "$(inherited) -force_load \"$(PODS_ROOT)/EyespieMediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a\""
   }
+  spec.preserve_paths = "frameworks/genai_libraries/*.a"
+  spec.frameworks = "Accelerate", "CoreVideo", "Metal", "OpenGLES"
+  spec.library = "c++"
+  spec.vendored_frameworks = "frameworks/MediaPipeTasksGenAIC.xcframework"
 end
