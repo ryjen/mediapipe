@@ -9,15 +9,15 @@ on:
   push:
     branches:
       - master
-      - agent/ios-mediapipe-pods-0.10.26
-    tags:
-      - "eyespie-ios-v0.10.26.1"
+    paths:
+      - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
+      - "distribution/ios/**"
 
 permissions:
   contents: read
 
 concurrency:
-  group: eyespie-ios-mediapipe-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -27,15 +27,16 @@ jobs:
     env:
       VERSION: 0.10.26.1
       POD_RELEASE_TAG: eyespie-ios-v0.10.26.1
+      HOMEBREW_NO_AUTO_UPDATE: "1"
 
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify source and release contract
+      - name: Verify immutable source baseline
         shell: bash
         run: |
           set -euo pipefail
@@ -43,9 +44,24 @@ jobs:
           merge_base="$(git merge-base HEAD v0.10.26)"
           test "${merge_base}" = "${baseline}"
 
-          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
-            test "${GITHUB_REF_NAME}" = "${POD_RELEASE_TAG}"
+          unexpected="$({
+            git diff --name-only v0.10.26...HEAD |
+              grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/)' || true
+          })"
+          if [[ -n "${unexpected}" ]]; then
+            echo "Unexpected source changes outside the distribution boundary:" >&2
+            echo "${unexpected}" >&2
+            exit 1
           fi
+
+      - name: Select Xcode 16.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          developer_dir="/Applications/Xcode_16.4.app/Contents/Developer"
+          test -d "${developer_dir}"
+          sudo xcode-select --switch "${developer_dir}"
+          test "$(xcodebuild -version | head -n 1)" = "Xcode 16.4"
 
       - name: Capture Apple toolchain
         shell: bash
@@ -56,22 +72,23 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
           xcrun --sdk iphonesimulator --show-sdk-version
           ruby --version
+          pod --version
           df -h
 
-      - name: Install Bazelisk and CocoaPods
+      - name: Install Bazelisk
         shell: bash
         run: |
           set -euo pipefail
-          brew install bazelisk cocoapods
+          command -v bazelisk >/dev/null || brew install bazelisk
           bazelisk version
-          bazel --version
-          pod --version
+          bazelisk --version
+          test "$(pod --version)" = "1.16.2"
 
       - name: Build Common, Vision, GenAIC, and GenAI
         shell: bash
         run: bash distribution/ios/build_eyespie_pods.sh
 
-      - name: Validate checksums and exact archive contents
+      - name: Validate checksums, slices, and module maps
         shell: bash
         run: |
           set -euo pipefail
@@ -87,21 +104,70 @@ jobs:
             tar -xzf "${framework}-${VERSION}.tar.gz" -C "${root}"
             test -f "${root}/LICENSE"
             test -d "${root}/frameworks/${framework}.xcframework"
-            plutil -lint "${root}/frameworks/${framework}.xcframework/Info.plist"
-            grep -q "ios-arm64" "${root}/frameworks/${framework}.xcframework/Info.plist"
-            grep -Eq "ios-arm64_x86_64-simulator|ios-arm64-simulator|ios-x86_64-simulator" \
-              "${root}/frameworks/${framework}.xcframework/Info.plist"
           done
 
-          test -f /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_simulator_graph.a
-          test -f /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_device_graph.a
-          test -f /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a
-          test -f /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a
+          python3 - <<'PY'
+          import pathlib
+          import plistlib
+          import subprocess
 
-          lipo -info /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_simulator_graph.a
-          lipo -info /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_device_graph.a
-          lipo -info /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a
-          lipo -info /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a
+          root = pathlib.Path('/tmp/mediapipe-pod-validation')
+          frameworks = (
+              'MediaPipeTasksCommon',
+              'MediaPipeTasksVision',
+              'MediaPipeTasksGenAIC',
+              'MediaPipeTasksGenAI',
+          )
+
+          for name in frameworks:
+              xcframework = root / name / 'frameworks' / f'{name}.xcframework'
+              with (xcframework / 'Info.plist').open('rb') as handle:
+                  metadata = plistlib.load(handle)
+
+              libraries = metadata.get('AvailableLibraries', [])
+              device = [entry for entry in libraries if entry.get('SupportedPlatform') == 'ios' and not entry.get('SupportedPlatformVariant')]
+              simulator = [entry for entry in libraries if entry.get('SupportedPlatform') == 'ios' and entry.get('SupportedPlatformVariant') == 'simulator']
+              assert device, f'{name}: missing iOS device slice'
+              assert simulator, f'{name}: missing iOS simulator slice'
+              assert any(set(entry.get('SupportedArchitectures', [])) == {'arm64'} for entry in device), f'{name}: device slice must be arm64'
+              assert any({'arm64', 'x86_64'}.issubset(set(entry.get('SupportedArchitectures', []))) for entry in simulator), f'{name}: simulator slice must contain arm64 and x86_64'
+
+              for entry in device + simulator:
+                  library = xcframework / entry['LibraryIdentifier'] / entry['LibraryPath']
+                  binary = library / name if library.is_dir() else library
+                  assert binary.exists(), f'{name}: missing binary {binary}'
+                  subprocess.run(['file', str(binary)], check=True)
+                  subprocess.run(['lipo', '-archs', str(binary)], check=True)
+
+                  if library.is_dir():
+                      module_map = library / 'Modules' / 'module.modulemap'
+                      assert module_map.exists(), f'{name}: missing module map {module_map}'
+          PY
+
+          assert_arch() {
+            local library="$1"
+            local required="$2"
+            local arches
+            arches="$(lipo -archs "${library}")"
+            grep -Eq "(^| )${required}( |$)" <<<"${arches}"
+          }
+
+          common_sim=/tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_simulator_graph.a
+          common_device=/tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_device_graph.a
+          genaic_sim=/tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a
+          genaic_device=/tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a
+
+          for library in "${common_sim}" "${common_device}" "${genaic_sim}" "${genaic_device}"; do
+            test -f "${library}"
+            file "${library}"
+          done
+
+          assert_arch "${common_sim}" arm64
+          assert_arch "${common_sim}" x86_64
+          assert_arch "${genaic_sim}" arm64
+          assert_arch "${genaic_sim}" x86_64
+          test "$(lipo -archs "${common_device}")" = "arm64"
+          test "$(lipo -archs "${genaic_device}")" = "arm64"
 
       - name: Validate podspec serialization
         shell: bash
@@ -112,52 +178,20 @@ jobs:
               pod ipc spec "${podspec}" >/tmp/"$(basename "${podspec}")".json
           done
 
-      - name: Lint and link candidate pods from local archives
+      - name: Build individual and combined CocoaPods consumers
         shell: bash
-        run: |
-          set -euo pipefail
+        run: bash distribution/ios/validate_eyespie_pods.sh
 
-          python3 -m http.server 8765 --bind 127.0.0.1 --directory dist/ios-pods \
-            >/tmp/mediapipe-pod-http.log 2>&1 &
-          server_pid=$!
-          trap 'kill "${server_pid}" 2>/dev/null || true; cat /tmp/mediapipe-pod-http.log || true' EXIT
-
-          base_url="http://127.0.0.1:8765"
-          curl --fail --silent --show-error \
-            "${base_url}/MediaPipeTasksCommon-${VERSION}.tar.gz" >/dev/null
-
-          common="distribution/ios/MediaPipeTasksCommon.podspec"
-          vision="distribution/ios/MediaPipeTasksVision.podspec"
-          genaic="distribution/ios/MediaPipeTasksGenAIC.podspec"
-          genai="distribution/ios/MediaPipeTasksGenAI.podspec"
-
-          POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" POD_SOURCE_BASE_URL="${base_url}" \
-            pod spec lint "${common}" --allow-warnings --verbose
-
-          POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" POD_SOURCE_BASE_URL="${base_url}" \
-            pod spec lint "${vision}" --include-podspecs="${common}" --allow-warnings --verbose
-
-          POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" POD_SOURCE_BASE_URL="${base_url}" \
-            pod spec lint "${genaic}" --allow-warnings --verbose
-
-          POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" POD_SOURCE_BASE_URL="${base_url}" \
-            pod spec lint "${genai}" --include-podspecs="${genaic}" --allow-warnings --verbose
-
-      - name: Upload candidate artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload candidate artifacts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: mediapipe-ios-${{ env.VERSION }}
+          name: mediapipe-ios-${{ env.VERSION }}-${{ github.run_attempt }}
           path: |
             dist/ios-pods/*.tar.gz
             dist/ios-pods/SHA256SUMS
             dist/ios-pods/provenance.txt
+            dist/ios-pods/build-logs/*.log
             distribution/ios/*.podspec
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
-
-      - name: Block tag publication pending Eyespie KMP gate
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          echo "Release publication is intentionally disabled until the Eyespie KMP consumer/link gate is implemented." >&2
-          exit 1
