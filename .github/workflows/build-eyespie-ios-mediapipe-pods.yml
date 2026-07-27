@@ -77,7 +77,7 @@ jobs:
           pod --version
           df -h
 
-      - name: Configure Bazelisk and CocoaPods
+      - name: Configure Bazelisk, Python, and CocoaPods
         shell: bash
         run: |
           set -euo pipefail
@@ -86,6 +86,7 @@ jobs:
             set -x
             command -v bazelisk >/dev/null || brew install bazelisk
             command -v pod >/dev/null || brew install cocoapods
+            brew list --versions python@3.11 >/dev/null || brew install python@3.11
 
             tool_bin="${RUNNER_TEMP}/eyespie-tools"
             mkdir -p "${tool_bin}"
@@ -94,7 +95,14 @@ jobs:
             chmod 0755 "${tool_bin}/bazel"
             echo "${tool_bin}" >> "${GITHUB_PATH}"
 
+            python311_bin="$(brew --prefix python@3.11)/libexec/bin"
+            test -x "${python311_bin}/python3"
+            echo "${python311_bin}" >> "${GITHUB_PATH}"
+            export PATH="${python311_bin}:${tool_bin}:${PATH}"
+
             test -x "${tool_bin}/bazel"
+            python3 --version
+            python3 -c 'import distutils; print(distutils.__file__)'
             pod --version
           } 2>&1 | tee dist/ios-pods/setup.log
 
