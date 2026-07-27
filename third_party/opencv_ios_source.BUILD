@@ -46,12 +46,14 @@ from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
-needle = '            "-GXcode",\n'
-insertion = needle + '            "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",\n'
 text = path.read_text(encoding="utf-8")
-if text.count(needle) != 1:
+lines = text.splitlines(keepends=True)
+matches = [index for index, line in enumerate(lines) if line.strip() == '"-GXcode",']
+if len(matches) != 1:
     raise SystemExit("OpenCV iOS -GXcode argument is not unique")
-path.write_text(text.replace(needle, insertion), encoding="utf-8")
+index = matches[0]
+lines.insert(index + 1, lines[index].replace("-GXcode", "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"))
+path.write_text("".join(lines), encoding="utf-8")
 PY
 "$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
   --iphonesimulator_archs arm64,x86_64 \
