@@ -6,12 +6,14 @@ on:
     paths:
       - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
       - "distribution/ios/**"
+      - "third_party/zlib.diff"
   push:
     branches:
       - eyespie/ios-pods-0.10.26
     paths:
       - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
       - "distribution/ios/**"
+      - "third_party/zlib.diff"
 
 permissions:
   contents: read
@@ -46,7 +48,7 @@ jobs:
 
           unexpected="$({
             git diff --name-only v0.10.26...HEAD |
-              grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/)' || true
+              grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/.*|third_party/zlib\.diff)$' || true
           })"
           if [[ -n "${unexpected}" ]]; then
             echo "Unexpected source changes outside the distribution boundary:" >&2
@@ -206,5 +208,6 @@ jobs:
             dist/ios-pods/setup.log
             dist/ios-pods/build-logs/*.log
             distribution/ios/*.podspec
+            third_party/zlib.diff
           if-no-files-found: warn
           retention-days: 14
