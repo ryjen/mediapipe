@@ -75,12 +75,19 @@ jobs:
           pod --version
           df -h
 
-      - name: Install Bazelisk
+      - name: Install Bazelisk and Bazel shim
         shell: bash
         run: |
           set -euo pipefail
           command -v bazelisk >/dev/null || brew install bazelisk
-          bazelisk version
+
+          tool_bin="${RUNNER_TEMP}/eyespie-tools"
+          mkdir -p "${tool_bin}"
+          cp "$(command -v bazelisk)" "${tool_bin}/bazel"
+          chmod 0755 "${tool_bin}/bazel"
+          echo "${tool_bin}" >> "${GITHUB_PATH}"
+
+          "${tool_bin}/bazel" version
           bazelisk --version
           test "$(pod --version)" = "1.16.2"
 
