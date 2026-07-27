@@ -29,7 +29,7 @@ exports_files(["LICENSE"])
 # OpenCV 4.5.3's iOS script predates modern CMake/Xcode cross-compilation
 # behavior. Patch an isolated source copy so CheckTypeSize probes compile as
 # static libraries instead of attempting to produce an iOS executable inside
-# Bazel's sandbox. The exact-match assertion fails closed if upstream changes.
+# Bazel's sandbox. The unique -GXcode line is the fail-closed insertion point.
 genrule(
     name = "build_opencv_xcframework",
     srcs = glob(["opencv-4.5.3/**"]),
@@ -46,19 +46,12 @@ from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
-old = '''        args = [
-            "cmake",
-            "-GXcode",
-            "-DAPPLE_FRAMEWORK=ON",'''
-new = '''        args = [
-            "cmake",
-            "-GXcode",
-            "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",
-            "-DAPPLE_FRAMEWORK=ON",'''
+needle = '            "-GXcode",\n'
+insertion = needle + '            "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",\n'
 text = path.read_text(encoding="utf-8")
-if text.count(old) != 1:
-    raise SystemExit("OpenCV iOS CMake argument block no longer matches 4.5.3")
-path.write_text(text.replace(old, new), encoding="utf-8")
+if text.count(needle) != 1:
+    raise SystemExit("OpenCV iOS -GXcode argument is not unique")
+path.write_text(text.replace(needle, insertion), encoding="utf-8")
 PY
 "$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
   --iphonesimulator_archs arm64,x86_64 \
