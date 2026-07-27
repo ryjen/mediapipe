@@ -38,6 +38,8 @@ build_framework() {
   fi
 
   cp "${archive}" "${DIST_DIR}/${framework}-${VERSION}.tar.gz"
+  df -h
+  bazel info output_base 2>/dev/null | xargs -I{} du -sh {} 2>/dev/null || true
 }
 
 cd "${REPO_ROOT}"
@@ -54,14 +56,25 @@ done
   shasum -a 256 ./*.tar.gz > SHA256SUMS
 )
 
+SOURCE_PATCH_SHA256="$({ git diff --binary v0.10.26...HEAD -- .github/workflows distribution/ios || true; } | shasum -a 256 | awk '{print $1}')"
+
 cat > "${DIST_DIR}/provenance.txt" <<EOF
 source_repository=https://github.com/google-ai-edge/mediapipe
 upstream_tag=v0.10.26
 distribution_commit=$(git rev-parse HEAD)
 upstream_commit=$(git rev-list -n 1 v0.10.26)
+source_patch_sha256=${SOURCE_PATCH_SHA256}
 distribution_version=${VERSION}
-bazel_version=$(bazelisk version 2>/dev/null | tail -n 1 || true)
+runner_os=${RUNNER_OS:-unknown}
+runner_arch=${RUNNER_ARCH:-unknown}
+bazelisk_version=$(bazelisk version 2>/dev/null | head -n 1 || true)
+bazel_version=$(bazel --version 2>/dev/null || true)
+ruby_version=$(ruby --version 2>/dev/null || true)
+cocoapods_version=$(pod --version 2>/dev/null || true)
+clang_version=$(xcrun clang --version 2>/dev/null | head -n 1 || true)
 xcode_version=$(xcodebuild -version | tr '\n' ' ')
+iphoneos_sdk=$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || true)
+iphonesimulator_sdk=$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null || true)
 EOF
 
 for archive in "${DIST_DIR}"/*.tar.gz; do
