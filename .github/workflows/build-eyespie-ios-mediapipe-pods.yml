@@ -79,22 +79,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v bazelisk >/dev/null || brew install bazelisk
+          mkdir -p dist/ios-pods
+          {
+            set -x
+            command -v bazelisk >/dev/null || brew install bazelisk
+            command -v pod >/dev/null || brew install cocoapods
 
-          tool_bin="${RUNNER_TEMP}/eyespie-tools"
-          mkdir -p "${tool_bin}"
-          cp "$(command -v bazelisk)" "${tool_bin}/bazel"
-          chmod 0755 "${tool_bin}/bazel"
-          test -x "${tool_bin}/bazel"
-          echo "${tool_bin}" >> "${GITHUB_PATH}"
+            tool_bin="${RUNNER_TEMP}/eyespie-tools"
+            mkdir -p "${tool_bin}"
+            bazelisk_path="$(command -v bazelisk)"
+            printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "${bazelisk_path}" > "${tool_bin}/bazel"
+            chmod 0755 "${tool_bin}/bazel"
+            echo "${tool_bin}" >> "${GITHUB_PATH}"
 
-          if [[ "$(pod --version)" != "1.16.2" ]]; then
-            gem install --user-install cocoapods -v 1.16.2 --no-document
-            ruby_user_bin="$(ruby -e 'print Gem.user_dir')/bin"
-            echo "${ruby_user_bin}" >> "${GITHUB_PATH}"
-            export PATH="${ruby_user_bin}:${PATH}"
-          fi
-          test "$(pod --version)" = "1.16.2"
+            test -x "${tool_bin}/bazel"
+            pod --version
+          } 2>&1 | tee dist/ios-pods/setup.log
 
       - name: Build Common, Vision, GenAIC, and GenAI
         shell: bash
@@ -203,6 +203,7 @@ jobs:
             dist/ios-pods/*.tar.gz
             dist/ios-pods/SHA256SUMS
             dist/ios-pods/provenance.txt
+            dist/ios-pods/setup.log
             dist/ios-pods/build-logs/*.log
             distribution/ios/*.podspec
           if-no-files-found: warn
