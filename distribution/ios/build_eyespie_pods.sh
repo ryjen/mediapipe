@@ -2,6 +2,7 @@
 set -euo pipefail
 
 VERSION="${VERSION:-0.10.26.1}"
+HERMETIC_PYTHON_VERSION="${HERMETIC_PYTHON_VERSION:-3.12}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 WORK_ROOT="${RUNNER_TEMP:-/tmp}/mediapipe-ios-pods"
 DIST_DIR="${REPO_ROOT}/dist/ios-pods"
@@ -18,6 +19,7 @@ build_framework() {
 
   local -a env_args=(
     "BAZEL=$(command -v bazelisk)"
+    "HERMETIC_PYTHON_VERSION=${HERMETIC_PYTHON_VERSION}"
     "FRAMEWORK_NAME=${framework}"
     "MPP_BUILD_VERSION=${VERSION}"
     "IS_RELEASE_BUILD=true"
@@ -76,6 +78,7 @@ upstream_commit=$(git rev-list -n 1 v0.10.26)
 source_patch_sha256=${SOURCE_PATCH_SHA256}
 changed_paths_sha256=${CHANGED_PATHS_SHA256}
 distribution_version=${VERSION}
+hermetic_python_version=${HERMETIC_PYTHON_VERSION}
 runner_os=${RUNNER_OS:-unknown}
 runner_arch=${RUNNER_ARCH:-unknown}
 runner_image=${ImageOS:-unknown}
