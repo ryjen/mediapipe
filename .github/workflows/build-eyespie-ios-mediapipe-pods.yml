@@ -11,7 +11,7 @@ on:
       - master
       - agent/ios-mediapipe-pods-0.10.26
     tags:
-      - "eyespie-ios-v*"
+      - "eyespie-ios-v0.10.26.1"
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-consume:
     runs-on: macos-15
     timeout-minutes: 240
     env:
@@ -35,7 +35,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify v0.10.26 baseline
+      - name: Verify source and release contract
         shell: bash
         run: |
           set -euo pipefail
@@ -43,13 +43,20 @@ jobs:
           merge_base="$(git merge-base HEAD v0.10.26)"
           test "${merge_base}" = "${baseline}"
 
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            test "${GITHUB_REF_NAME}" = "${POD_RELEASE_TAG}"
+          fi
+
       - name: Capture Apple toolchain
         shell: bash
         run: |
           set -euo pipefail
           xcodebuild -version
+          xcrun clang --version
           xcrun --sdk iphoneos --show-sdk-version
           xcrun --sdk iphonesimulator --show-sdk-version
+          ruby --version
+          df -h
 
       - name: Install Bazelisk and CocoaPods
         shell: bash
@@ -57,6 +64,7 @@ jobs:
           set -euo pipefail
           brew install bazelisk cocoapods
           bazelisk version
+          bazel --version
           pod --version
 
       - name: Build Common, Vision, GenAIC, and GenAI
@@ -74,10 +82,15 @@ jobs:
           mkdir -p /tmp/mediapipe-pod-validation
 
           for framework in MediaPipeTasksCommon MediaPipeTasksVision MediaPipeTasksGenAIC MediaPipeTasksGenAI; do
-            mkdir -p "/tmp/mediapipe-pod-validation/${framework}"
-            tar -xzf "${framework}-${VERSION}.tar.gz" -C "/tmp/mediapipe-pod-validation/${framework}"
-            test -f "/tmp/mediapipe-pod-validation/${framework}/LICENSE"
-            test -d "/tmp/mediapipe-pod-validation/${framework}/frameworks/${framework}.xcframework"
+            root="/tmp/mediapipe-pod-validation/${framework}"
+            mkdir -p "${root}"
+            tar -xzf "${framework}-${VERSION}.tar.gz" -C "${root}"
+            test -f "${root}/LICENSE"
+            test -d "${root}/frameworks/${framework}.xcframework"
+            plutil -lint "${root}/frameworks/${framework}.xcframework/Info.plist"
+            grep -q "ios-arm64" "${root}/frameworks/${framework}.xcframework/Info.plist"
+            grep -Eq "ios-arm64_x86_64-simulator|ios-arm64-simulator|ios-x86_64-simulator" \
+              "${root}/frameworks/${framework}.xcframework/Info.plist"
           done
 
           test -f /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_simulator_graph.a
@@ -85,7 +98,12 @@ jobs:
           test -f /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a
           test -f /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a
 
-      - name: Validate podspec syntax
+          lipo -info /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_simulator_graph.a
+          lipo -info /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_device_graph.a
+          lipo -info /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a
+          lipo -info /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a
+
+      - name: Validate podspec serialization
         shell: bash
         run: |
           set -euo pipefail
@@ -93,6 +111,37 @@ jobs:
             POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" \
               pod ipc spec "${podspec}" >/tmp/"$(basename "${podspec}")".json
           done
+
+      - name: Lint and link candidate pods from local archives
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory dist/ios-pods \
+            >/tmp/mediapipe-pod-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill "${server_pid}" 2>/dev/null || true; cat /tmp/mediapipe-pod-http.log || true' EXIT
+
+          base_url="http://127.0.0.1:8765"
+          curl --fail --silent --show-error \
+            "${base_url}/MediaPipeTasksCommon-${VERSION}.tar.gz" >/dev/null
+
+          common="distribution/ios/MediaPipeTasksCommon.podspec"
+          vision="distribution/ios/MediaPipeTasksVision.podspec"
+          genaic="distribution/ios/MediaPipeTasksGenAIC.podspec"
+          genai="distribution/ios/MediaPipeTasksGenAI.podspec"
+
+          POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" POD_SOURCE_BASE_URL="${base_url}" \
+            pod spec lint "${common}" --allow-warnings --verbose
+
+          POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" POD_SOURCE_BASE_URL="${base_url}" \
+            pod spec lint "${vision}" --include-podspecs="${common}" --allow-warnings --verbose
+
+          POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" POD_SOURCE_BASE_URL="${base_url}" \
+            pod spec lint "${genaic}" --allow-warnings --verbose
+
+          POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" POD_SOURCE_BASE_URL="${base_url}" \
+            pod spec lint "${genai}" --include-podspecs="${genaic}" --allow-warnings --verbose
 
       - name: Upload candidate artifacts
         uses: actions/upload-artifact@v4
@@ -106,39 +155,9 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/eyespie-ios-v')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Download candidate artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: mediapipe-ios-0.10.26.1
-          path: release-download
-
-      - name: Flatten and validate release assets
+      - name: Block tag publication pending Eyespie KMP gate
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p release-assets
-          find release-download -type f -exec cp '{}' release-assets/ \;
-          test -f release-assets/MediaPipeTasksCommon-0.10.26.1.tar.gz
-          test -f release-assets/MediaPipeTasksVision-0.10.26.1.tar.gz
-          test -f release-assets/MediaPipeTasksGenAIC-0.10.26.1.tar.gz
-          test -f release-assets/MediaPipeTasksGenAI-0.10.26.1.tar.gz
-
-      - name: Publish prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" \
-            --verify-tag \
-            --prerelease \
-            --title "MediaPipe iOS 0.10.26.1 for Eyespie" \
-            --notes "Common, Vision, GenAIC, and GenAI built coherently from upstream v0.10.26." \
-            release-assets/*
+          echo "Release publication is intentionally disabled until the Eyespie KMP consumer/link gate is implemented." >&2
+          exit 1
