@@ -75,7 +75,7 @@ jobs:
           pod --version
           df -h
 
-      - name: Install Bazelisk and Bazel shim
+      - name: Configure Bazelisk and CocoaPods
         shell: bash
         run: |
           set -euo pipefail
@@ -85,10 +85,15 @@ jobs:
           mkdir -p "${tool_bin}"
           cp "$(command -v bazelisk)" "${tool_bin}/bazel"
           chmod 0755 "${tool_bin}/bazel"
+          test -x "${tool_bin}/bazel"
           echo "${tool_bin}" >> "${GITHUB_PATH}"
 
-          "${tool_bin}/bazel" version
-          bazelisk --version
+          if [[ "$(pod --version)" != "1.16.2" ]]; then
+            gem install --user-install cocoapods -v 1.16.2 --no-document
+            ruby_user_bin="$(ruby -e 'print Gem.user_dir')/bin"
+            echo "${ruby_user_bin}" >> "${GITHUB_PATH}"
+            export PATH="${ruby_user_bin}:${PATH}"
+          fi
           test "$(pod --version)" = "1.16.2"
 
       - name: Build Common, Vision, GenAIC, and GenAI
