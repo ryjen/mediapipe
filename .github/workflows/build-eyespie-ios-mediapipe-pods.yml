@@ -80,7 +80,6 @@ jobs:
         run: |
           set -euo pipefail
           command -v bazelisk >/dev/null || brew install bazelisk
-          command -v bazel >/dev/null
           bazelisk version
           bazelisk --version
           test "$(pod --version)" = "1.16.2"
