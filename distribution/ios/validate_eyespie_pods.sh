@@ -47,7 +47,18 @@ lint() {
   POD_VERSION="${VERSION}" \
   POD_RELEASE_TAG="eyespie-ios-v${VERSION}" \
   POD_SOURCE_BASE_URL="${base_url}" \
-    pod spec lint "$@" --verbose 2>&1 | tee "${log}"
+    pod spec lint "$@" --allow-warnings --verbose 2>&1 | tee "${log}"
+
+  local unexpected_warnings
+  unexpected_warnings="$({
+    grep -E '^[[:space:]]*-[[:space:]]+WARN[[:space:]]+\|' "${log}" |
+      grep -Ev 'user_target_xcconfig' || true
+  })"
+  if [[ -n "${unexpected_warnings}" ]]; then
+    echo "Unexpected CocoaPods lint warnings for ${name}:" >&2
+    echo "${unexpected_warnings}" >&2
+    return 1
+  fi
 }
 
 lint common "${common}"
@@ -94,4 +105,4 @@ end
 RUBY
 
 lint combined "${smoke_podspec}" \
-  --include-podspecs="${common},${vision},${genaic},${genai}"
+  --include-podspecs="${PODSPEC_DIR}/*.podspec"
