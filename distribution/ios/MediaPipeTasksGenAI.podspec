@@ -9,8 +9,10 @@ Pod::Spec.new do |spec|
   spec.platform = :ios, "15.0"
 
   tag = ENV.fetch("POD_RELEASE_TAG", "eyespie-ios-v0.10.26.1")
+  base_url = ENV["POD_SOURCE_BASE_URL"]
+  archive = "MediaPipeTasksGenAI-#{spec.version}.tar.gz"
   spec.source = {
-    :http => "https://github.com/ryjen/mediapipe/releases/download/#{tag}/MediaPipeTasksGenAI-#{spec.version}.tar.gz"
+    :http => base_url ? "#{base_url}/#{archive}" : "https://github.com/ryjen/mediapipe/releases/download/#{tag}/#{archive}"
   }
 
   spec.vendored_frameworks = "frameworks/MediaPipeTasksGenAI.xcframework"
