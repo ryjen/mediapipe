@@ -122,7 +122,6 @@ PY
   --without photo \
   --without objdetect \
   --without gapi \
-  --without flann \
   --without highgui \
   --without videoio \
   --disable PROTOBUF \
