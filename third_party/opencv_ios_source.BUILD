@@ -50,11 +50,24 @@ from pathlib import Path
 import sys
 
 build_script = Path(sys.argv[1])
-text = build_script.read_text(encoding="utf-8")
-lines = text.splitlines(keepends=True)
-matches = [index for index, line in enumerate(lines) if line.strip() == '"-GXcode",']
+lines = build_script.read_text(encoding="utf-8").splitlines(keepends=True)
+function_starts = [
+    index for index, line in enumerate(lines)
+    if line.startswith("    def getCMakeArgs(")
+]
+if len(function_starts) != 1:
+    raise SystemExit(f"OpenCV getCMakeArgs definition count: {len(function_starts)}")
+start = function_starts[0]
+end = next(
+    (index for index in range(start + 1, len(lines)) if lines[index].startswith("    def ")),
+    len(lines),
+)
+matches = [
+    index for index in range(start, end)
+    if lines[index].strip() == '"-GXcode",'
+]
 if len(matches) != 1:
-    raise SystemExit("OpenCV iOS -GXcode argument is not unique")
+    raise SystemExit(f"OpenCV getCMakeArgs -GXcode count: {len(matches)}")
 index = matches[0]
 lines.insert(index + 1, lines[index].replace("-GXcode", "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"))
 build_script.write_text("".join(lines), encoding="utf-8")
