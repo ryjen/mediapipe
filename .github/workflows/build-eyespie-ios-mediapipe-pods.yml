@@ -1,0 +1,144 @@
+name: Build Eyespie iOS MediaPipe Pods
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
+      - "distribution/ios/**"
+  push:
+    branches:
+      - master
+      - agent/ios-mediapipe-pods-0.10.26
+    tags:
+      - "eyespie-ios-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eyespie-ios-mediapipe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 240
+    env:
+      VERSION: 0.10.26.1
+      POD_RELEASE_TAG: eyespie-ios-v0.10.26.1
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify v0.10.26 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline="$(git rev-list -n 1 v0.10.26)"
+          merge_base="$(git merge-base HEAD v0.10.26)"
+          test "${merge_base}" = "${baseline}"
+
+      - name: Capture Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+
+      - name: Install Bazelisk and CocoaPods
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install bazelisk cocoapods
+          bazelisk version
+          pod --version
+
+      - name: Build Common, Vision, GenAIC, and GenAI
+        shell: bash
+        run: bash distribution/ios/build_eyespie_pods.sh
+
+      - name: Validate checksums and exact archive contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist/ios-pods
+          shasum -a 256 --check SHA256SUMS
+
+          rm -rf /tmp/mediapipe-pod-validation
+          mkdir -p /tmp/mediapipe-pod-validation
+
+          for framework in MediaPipeTasksCommon MediaPipeTasksVision MediaPipeTasksGenAIC MediaPipeTasksGenAI; do
+            mkdir -p "/tmp/mediapipe-pod-validation/${framework}"
+            tar -xzf "${framework}-${VERSION}.tar.gz" -C "/tmp/mediapipe-pod-validation/${framework}"
+            test -f "/tmp/mediapipe-pod-validation/${framework}/LICENSE"
+            test -d "/tmp/mediapipe-pod-validation/${framework}/frameworks/${framework}.xcframework"
+          done
+
+          test -f /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_simulator_graph.a
+          test -f /tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_device_graph.a
+          test -f /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a
+          test -f /tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a
+
+      - name: Validate podspec syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          for podspec in distribution/ios/*.podspec; do
+            POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" \
+              pod ipc spec "${podspec}" >/tmp/"$(basename "${podspec}")".json
+          done
+
+      - name: Upload candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mediapipe-ios-${{ env.VERSION }}
+          path: |
+            dist/ios-pods/*.tar.gz
+            dist/ios-pods/SHA256SUMS
+            dist/ios-pods/provenance.txt
+            distribution/ios/*.podspec
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/eyespie-ios-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download candidate artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mediapipe-ios-0.10.26.1
+          path: release-download
+
+      - name: Flatten and validate release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find release-download -type f -exec cp '{}' release-assets/ \;
+          test -f release-assets/MediaPipeTasksCommon-0.10.26.1.tar.gz
+          test -f release-assets/MediaPipeTasksVision-0.10.26.1.tar.gz
+          test -f release-assets/MediaPipeTasksGenAIC-0.10.26.1.tar.gz
+          test -f release-assets/MediaPipeTasksGenAI-0.10.26.1.tar.gz
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --prerelease \
+            --title "MediaPipe iOS 0.10.26.1 for Eyespie" \
+            --notes "Common, Vision, GenAIC, and GenAI built coherently from upstream v0.10.26." \
+            release-assets/*
