@@ -122,8 +122,10 @@ PY
   --without photo \
   --without objdetect \
   --without gapi \
+  --without flann \
   --without highgui \
   --without videoio \
+  --without objc \
   --disable PROTOBUF \
   --disable-bitcode \
   --disable-swift \
