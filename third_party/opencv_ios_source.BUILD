@@ -55,17 +55,21 @@ function_starts = [
     index for index, line in enumerate(lines)
     if line.startswith("    def getCMakeArgs(")
 ]
-if len(function_starts) != 1:
-    raise SystemExit(f"OpenCV getCMakeArgs definition count: {len(function_starts)}")
-start = function_starts[0]
-end = next(
-    (index for index in range(start + 1, len(lines)) if lines[index].startswith("    def ")),
-    len(lines),
-)
-matches = [
-    index for index in range(start, end)
-    if lines[index].strip() == '"-GXcode",'
-]
+if not function_starts:
+    raise SystemExit("OpenCV getCMakeArgs definition is missing")
+matches = []
+for start in function_starts:
+    end = next(
+        (
+            index for index in range(start + 1, len(lines))
+            if lines[index].startswith("    def ") or lines[index].startswith("class ")
+        ),
+        len(lines),
+    )
+    matches.extend(
+        index for index in range(start, end)
+        if lines[index].strip() == '"-GXcode",'
+    )
 if len(matches) != 1:
     raise SystemExit(f"OpenCV getCMakeArgs -GXcode count: {len(matches)}")
 index = matches[0]
@@ -94,6 +98,7 @@ PY
 "$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
   --iphonesimulator_archs arm64,x86_64 \
   --iphoneos_archs arm64 \
+  --iphoneos_deployment_target 15.0 \
   --without dnn \
   --without ml \
   --without stitching \
@@ -114,7 +119,7 @@ zip --symlinks -r opencv2.xcframework.zip opencv2.xcframework
 )
 
 # Unzips `opencv2.xcframework.zip` built from source by `build_opencv_xcframework`
-# genrule and returns an exhaustive list of its files including symlinks.
+# genrule and returns an exhaustive list of all its files including symlinks.
 unzip_opencv_xcframework(
     name = "opencv2_unzipped_xcframework_files",
     zip_file = "opencv2.xcframework.zip",
