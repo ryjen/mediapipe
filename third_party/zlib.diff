@@ -63,7 +63,7 @@ diff -ruN a/contrib/minizip/ioapi.h b/contrib/minizip/ioapi.h
 diff -ruN a/zutil.h b/zutil.h
 --- a/zutil.h
 +++ b/zutil.h
-@@ -138,17 +138,7 @@
+@@ -138,17 +138,8 @@
  #  endif
  #endif
  
