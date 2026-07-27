@@ -7,6 +7,7 @@ on:
       - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
       - "distribution/ios/**"
       - "third_party/zlib.diff"
+      - "third_party/opencv_ios_source.BUILD"
   push:
     branches:
       - eyespie/ios-pods-0.10.26
@@ -14,6 +15,7 @@ on:
       - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
       - "distribution/ios/**"
       - "third_party/zlib.diff"
+      - "third_party/opencv_ios_source.BUILD"
 
 permissions:
   contents: read
@@ -48,7 +50,7 @@ jobs:
 
           unexpected="$({
             git diff --name-only v0.10.26...HEAD |
-              grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/.*|third_party/zlib\.diff)$' || true
+              grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/.*|third_party/zlib\.diff|third_party/opencv_ios_source\.BUILD)$' || true
           })"
           if [[ -n "${unexpected}" ]]; then
             echo "Unexpected source changes outside the distribution boundary:" >&2
@@ -100,19 +102,19 @@ jobs:
             echo "${python311_bin}" >> "${GITHUB_PATH}"
             export PATH="${python311_bin}:${tool_bin}:${PATH}"
 
-            cmake_venv="${RUNNER_TEMP}/cmake-3.31.6"
+            cmake_venv="${RUNNER_TEMP}/cmake-3.24.0"
             python3 -m venv "${cmake_venv}"
             "${cmake_venv}/bin/python" -m pip install \
               --disable-pip-version-check \
               --no-cache-dir \
-              "cmake==3.31.6"
+              "cmake==3.24.0"
             echo "${cmake_venv}/bin" >> "${GITHUB_PATH}"
             export PATH="${cmake_venv}/bin:${PATH}"
 
             test -x "${tool_bin}/bazel"
             python3 --version
             python3 -c 'import distutils; print(distutils.__file__)'
-            test "$(cmake --version | head -n 1)" = "cmake version 3.31.6"
+            test "$(cmake --version | head -n 1)" = "cmake version 3.24.0"
             pod --version
           } 2>&1 | tee dist/ios-pods/setup.log
 
@@ -227,5 +229,6 @@ jobs:
             dist/ios-pods/build-logs/*.log
             distribution/ios/*.podspec
             third_party/zlib.diff
+            third_party/opencv_ios_source.BUILD
           if-no-files-found: warn
           retention-days: 14
