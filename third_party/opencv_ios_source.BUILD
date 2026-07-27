@@ -26,10 +26,11 @@ exports_files(["LICENSE"])
 # Swift support throws linker errors when the MediaPipe framework is used from
 # an iOS project.
 #
-# OpenCV 4.5.3's iOS script predates modern CMake/Xcode cross-compilation
-# behavior, and its bundled zlib predates current Apple SDK headers. Patch an
-# isolated source copy so CheckTypeSize probes compile as static libraries and
-# zlib does not redefine fdopen on Apple targets. Both edits fail closed.
+# OpenCV 4.5.3 predates modern CMake/Xcode cross-compilation behavior, and its
+# bundled zlib/libpng predates current Apple SDK headers. Patch an isolated
+# source copy so probes compile as static libraries, zlib does not redefine
+# fdopen, and libpng does not include removed classic-Mac fp.h. All edits fail
+# closed against the exact legacy conditions.
 genrule(
     name = "build_opencv_xcframework",
     srcs = glob(["opencv-4.5.3/**"]),
@@ -43,7 +44,8 @@ cp -R "$$source_root" "$$patched_parent/opencv-4.5.3"
 chmod -R u+w "$$patched_parent/opencv-4.5.3"
 python3 - \
   "$$patched_parent/opencv-4.5.3/platforms/ios/build_framework.py" \
-  "$$patched_parent/opencv-4.5.3/3rdparty/zlib/zutil.h" <<'PY'
+  "$$patched_parent/opencv-4.5.3/3rdparty/zlib/zutil.h" \
+  "$$patched_parent/opencv-4.5.3/3rdparty/libpng/pngpriv.h" <<'PY'
 from pathlib import Path
 import sys
 
@@ -59,10 +61,22 @@ build_script.write_text("".join(lines), encoding="utf-8")
 
 zutil = Path(sys.argv[2])
 zutil_text = zutil.read_text(encoding="utf-8")
-old_condition = "#if defined(MACOS) || defined(TARGET_OS_MAC)"
-if zutil_text.count(old_condition) != 1:
+old_zlib_condition = "#if defined(MACOS) || defined(TARGET_OS_MAC)"
+if zutil_text.count(old_zlib_condition) != 1:
     raise SystemExit("OpenCV bundled zlib Apple condition no longer matches")
-zutil.write_text(zutil_text.replace(old_condition, "#if defined(MACOS)"), encoding="utf-8")
+zutil.write_text(zutil_text.replace(old_zlib_condition, "#if defined(MACOS)"), encoding="utf-8")
+
+pngpriv = Path(sys.argv[3])
+pngpriv_lines = pngpriv.read_text(encoding="utf-8").splitlines(keepends=True)
+png_matches = [
+    index for index, line in enumerate(pngpriv_lines)
+    if "defined(__SC__)" in line and "defined(TARGET_OS_MAC)" in line
+]
+if len(png_matches) != 1:
+    raise SystemExit("OpenCV bundled libpng Apple fp.h condition no longer matches")
+png_index = png_matches[0]
+pngpriv_lines[png_index] = pngpriv_lines[png_index].replace(" || defined(TARGET_OS_MAC)", "")
+pngpriv.write_text("".join(pngpriv_lines), encoding="utf-8")
 PY
 "$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
   --iphonesimulator_archs arm64,x86_64 \
