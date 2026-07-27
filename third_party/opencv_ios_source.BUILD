@@ -29,8 +29,8 @@ exports_files(["LICENSE"])
 # OpenCV 4.5.3 predates modern CMake/Xcode cross-compilation behavior, and its
 # bundled zlib/libpng predates current Apple SDK headers. Patch an isolated
 # source copy so probes compile as static libraries, zlib does not redefine
-# fdopen, and libpng does not include removed classic-Mac fp.h. All edits fail
-# closed against the exact legacy conditions.
+# fdopen, and libpng does not include removed classic-Mac fp.h. All edits are
+# idempotent and fail closed against an unexpected third state.
 genrule(
     name = "build_opencv_xcframework",
     srcs = glob(["opencv-4.5.3/**"]),
@@ -73,26 +73,43 @@ for start in function_starts:
 if len(matches) != 1:
     raise SystemExit(f"OpenCV getCMakeArgs -GXcode count: {len(matches)}")
 index = matches[0]
-lines.insert(index + 1, lines[index].replace("-GXcode", "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"))
+static_arg = '"-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",'
+static_matches = [i for i, line in enumerate(lines) if line.strip() == static_arg]
+if not static_matches:
+    lines.insert(index + 1, lines[index].replace("-GXcode", "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"))
+elif static_matches != [index + 1]:
+    raise SystemExit(f"OpenCV static try-compile argument positions: {static_matches}")
 build_script.write_text("".join(lines), encoding="utf-8")
 
 zutil = Path(sys.argv[2])
-zutil_text = zutil.read_text(encoding="utf-8")
-old_zlib_condition = "#if defined(MACOS) || defined(TARGET_OS_MAC)"
-if zutil_text.count(old_zlib_condition) != 1:
-    raise SystemExit("OpenCV bundled zlib Apple condition no longer matches")
-zutil.write_text(zutil_text.replace(old_zlib_condition, "#if defined(MACOS)"), encoding="utf-8")
+zutil_lines = zutil.read_text(encoding="utf-8").splitlines(keepends=True)
+os_code_candidates = [
+    index for index in range(len(zutil_lines))
+    if "OS_CODE" in zutil_lines[index] and "7" in zutil_lines[index]
+]
+if len(os_code_candidates) != 1 or os_code_candidates[0] == 0:
+    raise SystemExit(f"OpenCV bundled zlib OS_CODE 7 candidates: {os_code_candidates}")
+zutil_index = os_code_candidates[0] - 1
+zutil_condition = zutil_lines[zutil_index].strip()
+if zutil_condition == "#if defined(MACOS) || defined(TARGET_OS_MAC)":
+    zutil_lines[zutil_index] = zutil_lines[zutil_index].replace(" || defined(TARGET_OS_MAC)", "")
+elif zutil_condition != "#if defined(MACOS)":
+    raise SystemExit(f"OpenCV bundled zlib Apple condition: {zutil_condition}")
+zutil.write_text("".join(zutil_lines), encoding="utf-8")
 
 pngpriv = Path(sys.argv[3])
 pngpriv_lines = pngpriv.read_text(encoding="utf-8").splitlines(keepends=True)
 png_matches = [
     index for index, line in enumerate(pngpriv_lines)
-    if "defined(__SC__)" in line and "defined(TARGET_OS_MAC)" in line
+    if "defined(__SC__)" in line
 ]
 if len(png_matches) != 1:
-    raise SystemExit("OpenCV bundled libpng Apple fp.h condition no longer matches")
+    raise SystemExit(f"OpenCV bundled libpng classic-Mac condition count: {len(png_matches)}")
 png_index = png_matches[0]
-pngpriv_lines[png_index] = pngpriv_lines[png_index].replace(" || defined(TARGET_OS_MAC)", "")
+if "defined(TARGET_OS_MAC)" in pngpriv_lines[png_index]:
+    pngpriv_lines[png_index] = pngpriv_lines[png_index].replace(" || defined(TARGET_OS_MAC)", "")
+elif pngpriv_lines[png_index].rstrip().endswith("||"):
+    raise SystemExit("OpenCV bundled libpng condition ended unexpectedly")
 pngpriv.write_text("".join(pngpriv_lines), encoding="utf-8")
 PY
 "$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
