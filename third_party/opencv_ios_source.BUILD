@@ -79,16 +79,18 @@ pngpriv.write_text("".join(pngpriv_lines), encoding="utf-8")
 PY
 
 real_cmake="$$(command -v cmake)"
-cat > "$$cmake_wrapper_dir/cmake" <<EOF
+cat > "$$cmake_wrapper_dir/cmake" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-for argument in "\$@"; do
-  if [[ "\$argument" == "-GXcode" ]]; then
-    exec "$$real_cmake" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY "\$@"
+for argument in "$$@"; do
+  if [[ "$$argument" == "-GXcode" ]]; then
+    exec "__REAL_CMAKE__" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY "$$@"
   fi
 done
-exec "$$real_cmake" "\$@"
+exec "__REAL_CMAKE__" "$$@"
 EOF
+sed -i.bak "s|__REAL_CMAKE__|$$real_cmake|g" "$$cmake_wrapper_dir/cmake"
+rm -f "$$cmake_wrapper_dir/cmake.bak"
 chmod 0755 "$$cmake_wrapper_dir/cmake"
 
 PATH="$$cmake_wrapper_dir:$$PATH" \
