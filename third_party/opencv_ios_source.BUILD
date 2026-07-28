@@ -82,20 +82,16 @@ elif static_matches != [index + 1]:
 build_script.write_text("".join(lines), encoding="utf-8")
 
 zutil = Path(sys.argv[2])
-zutil_lines = zutil.read_text(encoding="utf-8").splitlines(keepends=True)
-os_code_candidates = [
-    index for index in range(len(zutil_lines))
-    if "OS_CODE" in zutil_lines[index] and "7" in zutil_lines[index]
-]
-if len(os_code_candidates) != 1 or os_code_candidates[0] == 0:
-    raise SystemExit(f"OpenCV bundled zlib OS_CODE 7 candidates: {os_code_candidates}")
-zutil_index = os_code_candidates[0] - 1
-zutil_condition = zutil_lines[zutil_index].strip()
-if zutil_condition == "#if defined(MACOS) || defined(TARGET_OS_MAC)":
-    zutil_lines[zutil_index] = zutil_lines[zutil_index].replace(" || defined(TARGET_OS_MAC)", "")
-elif zutil_condition != "#if defined(MACOS)":
-    raise SystemExit(f"OpenCV bundled zlib Apple condition: {zutil_condition}")
-zutil.write_text("".join(zutil_lines), encoding="utf-8")
+zutil_text = zutil.read_text(encoding="utf-8")
+legacy_zlib_condition = "#if defined(MACOS) || defined(TARGET_OS_MAC)"
+legacy_count = zutil_text.count(legacy_zlib_condition)
+if legacy_count == 1:
+    zutil_text = zutil_text.replace(legacy_zlib_condition, "#if defined(MACOS)")
+elif legacy_count > 1:
+    raise SystemExit(f"OpenCV bundled zlib legacy Apple condition count: {legacy_count}")
+elif "TARGET_OS_MAC" in zutil_text:
+    raise SystemExit("OpenCV bundled zlib contains unexpected TARGET_OS_MAC usage")
+zutil.write_text(zutil_text, encoding="utf-8")
 
 pngpriv = Path(sys.argv[3])
 pngpriv_lines = pngpriv.read_text(encoding="utf-8").splitlines(keepends=True)
