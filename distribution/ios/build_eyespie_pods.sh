@@ -11,6 +11,30 @@ LOG_DIR="${DIST_DIR}/build-logs"
 rm -rf "${WORK_ROOT}" "${DIST_DIR}"
 mkdir -p "${WORK_ROOT}" "${DIST_DIR}" "${LOG_DIR}"
 
+prepare_public_genai_cpu_source() {
+  local source_file="${REPO_ROOT}/mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_cpu.cc"
+
+  python3 - "${source_file}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """int LlmInferenceEngine_CreateEngine(const LlmModelSettings* model_settings,
+                                    LlmInferenceEngine_Session** engine_out,
+                                    char** error_msg) {"""
+new = """int LlmInferenceEngine_CreateEngine(const LlmModelSettings* model_settings,
+                                    LlmInferenceEngine_Engine** engine_out,
+                                    char** error_msg) {"""
+
+if text.count(new) == 1 and old not in text:
+    raise SystemExit(0)
+if text.count(old) != 1:
+    raise SystemExit("Unexpected public GenAI CPU CreateEngine signature")
+path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+}
+
 build_framework() {
   local framework="$1"
   local destination="${WORK_ROOT}/${framework}"
@@ -54,6 +78,8 @@ build_framework() {
 }
 
 cd "${REPO_ROOT}"
+prepare_public_genai_cpu_source
+
 for framework in \
   MediaPipeTasksCommon \
   MediaPipeTasksVision \
@@ -79,6 +105,7 @@ source_patch_sha256=${SOURCE_PATCH_SHA256}
 changed_paths_sha256=${CHANGED_PATHS_SHA256}
 distribution_version=${VERSION}
 hermetic_python_version=${HERMETIC_PYTHON_VERSION}
+genai_backend=public_cpu_only
 runner_os=${RUNNER_OS:-unknown}
 runner_arch=${RUNNER_ARCH:-unknown}
 runner_image=${ImageOS:-unknown}
