@@ -27,10 +27,10 @@ exports_files(["LICENSE"])
 # an iOS project.
 #
 # OpenCV 4.5.3 predates modern CMake/Xcode cross-compilation behavior, and its
-# bundled zlib/libpng predates current Apple SDK headers. Patch an isolated
-# source copy so probes compile as static libraries, zlib does not redefine
-# fdopen, and libpng does not include removed classic-Mac fp.h. All edits are
-# idempotent and fail closed against an unexpected third state.
+# bundled zlib/libpng predates current Apple SDK headers. Build an isolated
+# source copy, inject static-library try-compile behavior through a scoped CMake
+# wrapper, and remove the obsolete bundled dependency Apple conditions. The
+# source edits are idempotent and fail closed against unexpected states.
 genrule(
     name = "build_opencv_xcframework",
     srcs = glob(["opencv-4.5.3/**"]),
@@ -39,49 +39,18 @@ genrule(
 set -euo pipefail
 source_root="$$(cd "$$(dirname "$(location opencv-4.5.3/platforms/apple/build_xcframework.py)")/../.." && pwd)"
 patched_parent="$$(mktemp -d "$${TMPDIR:-/tmp}/opencv-4.5.3.XXXXXX")"
-trap 'rm -rf "$$patched_parent"' EXIT
+cmake_wrapper_dir="$$(mktemp -d "$${TMPDIR:-/tmp}/opencv-cmake.XXXXXX")"
+trap 'rm -rf "$$patched_parent" "$$cmake_wrapper_dir"' EXIT
 cp -R "$$source_root" "$$patched_parent/opencv-4.5.3"
 chmod -R u+w "$$patched_parent/opencv-4.5.3"
+
 python3 - \
-  "$$patched_parent/opencv-4.5.3/platforms/ios/build_framework.py" \
   "$$patched_parent/opencv-4.5.3/3rdparty/zlib/zutil.h" \
   "$$patched_parent/opencv-4.5.3/3rdparty/libpng/pngpriv.h" <<'PY'
 from pathlib import Path
 import sys
 
-build_script = Path(sys.argv[1])
-lines = build_script.read_text(encoding="utf-8").splitlines(keepends=True)
-function_starts = [
-    index for index, line in enumerate(lines)
-    if line.startswith("    def getCMakeArgs(")
-]
-if not function_starts:
-    raise SystemExit("OpenCV getCMakeArgs definition is missing")
-matches = []
-for start in function_starts:
-    end = next(
-        (
-            index for index in range(start + 1, len(lines))
-            if lines[index].startswith("    def ") or lines[index].startswith("class ")
-        ),
-        len(lines),
-    )
-    matches.extend(
-        index for index in range(start, end)
-        if lines[index].strip() == '"-GXcode",'
-    )
-if len(matches) != 1:
-    raise SystemExit(f"OpenCV getCMakeArgs -GXcode count: {len(matches)}")
-index = matches[0]
-static_arg = '"-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY",'
-static_matches = [i for i, line in enumerate(lines) if line.strip() == static_arg]
-if not static_matches:
-    lines.insert(index + 1, lines[index].replace("-GXcode", "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"))
-elif static_matches != [index + 1]:
-    raise SystemExit(f"OpenCV static try-compile argument positions: {static_matches}")
-build_script.write_text("".join(lines), encoding="utf-8")
-
-zutil = Path(sys.argv[2])
+zutil = Path(sys.argv[1])
 zutil_text = zutil.read_text(encoding="utf-8")
 legacy_zlib_condition = "#if defined(MACOS) || defined(TARGET_OS_MAC)"
 legacy_count = zutil_text.count(legacy_zlib_condition)
@@ -93,7 +62,7 @@ elif "TARGET_OS_MAC" in zutil_text:
     raise SystemExit("OpenCV bundled zlib contains unexpected TARGET_OS_MAC usage")
 zutil.write_text(zutil_text, encoding="utf-8")
 
-pngpriv = Path(sys.argv[3])
+pngpriv = Path(sys.argv[2])
 pngpriv_lines = pngpriv.read_text(encoding="utf-8").splitlines(keepends=True)
 png_matches = [
     index for index, line in enumerate(pngpriv_lines)
@@ -108,6 +77,21 @@ elif pngpriv_lines[png_index].rstrip().endswith("||"):
     raise SystemExit("OpenCV bundled libpng condition ended unexpectedly")
 pngpriv.write_text("".join(pngpriv_lines), encoding="utf-8")
 PY
+
+real_cmake="$$(command -v cmake)"
+cat > "$$cmake_wrapper_dir/cmake" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+for argument in "\$@"; do
+  if [[ "\$argument" == "-GXcode" ]]; then
+    exec "$$real_cmake" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY "\$@"
+  fi
+done
+exec "$$real_cmake" "\$@"
+EOF
+chmod 0755 "$$cmake_wrapper_dir/cmake"
+
+PATH="$$cmake_wrapper_dir:$$PATH" \
 "$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
   --iphonesimulator_archs arm64,x86_64 \
   --iphoneos_archs arm64 \
