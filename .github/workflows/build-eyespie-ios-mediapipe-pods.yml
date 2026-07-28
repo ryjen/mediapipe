@@ -6,6 +6,8 @@ on:
     paths:
       - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
       - "distribution/ios/**"
+      - "mediapipe/tasks/cc/genai/inference/c/BUILD"
+      - "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h"
       - "third_party/zlib.diff"
       - "third_party/opencv_ios_source.BUILD"
   push:
@@ -14,6 +16,8 @@ on:
     paths:
       - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
       - "distribution/ios/**"
+      - "mediapipe/tasks/cc/genai/inference/c/BUILD"
+      - "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h"
       - "third_party/zlib.diff"
       - "third_party/opencv_ios_source.BUILD"
 
@@ -50,7 +54,7 @@ jobs:
 
           unexpected="$({
             git diff --name-only v0.10.26...HEAD |
-              grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/.*|third_party/zlib\.diff|third_party/opencv_ios_source\.BUILD)$' || true
+              grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/.*|mediapipe/tasks/cc/genai/inference/c/BUILD|mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios\.h|third_party/zlib\.diff|third_party/opencv_ios_source\.BUILD)$' || true
           })"
           if [[ -n "${unexpected}" ]]; then
             echo "Unexpected source changes outside the distribution boundary:" >&2
@@ -228,6 +232,8 @@ jobs:
             dist/ios-pods/setup.log
             dist/ios-pods/build-logs/*.log
             distribution/ios/*.podspec
+            mediapipe/tasks/cc/genai/inference/c/BUILD
+            mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h
             third_party/zlib.diff
             third_party/opencv_ios_source.BUILD
           if-no-files-found: warn
