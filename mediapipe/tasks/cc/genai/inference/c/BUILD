@@ -19,6 +19,8 @@ package(default_visibility = [
     "//third_party/odml/litert:__subpackages__",
 ])
 
+exports_files(["llm_inference_engine_ios.h"])
+
 cc_library(
     name = "llm_inference_engine_hdr",
     hdrs = ["llm_inference_engine.h"],
