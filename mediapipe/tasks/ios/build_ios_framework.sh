@@ -112,8 +112,8 @@ function build_ios_frameworks_and_libraries {
 
   case $FRAMEWORK_NAME in
     # `MediaPipeTasksCommon` pods must also include the task graph libraries which
-  # are to be force loaded. Hence the graph libraies are only built if the framework
-  # name is `MediaPipeTasksCommon`.`
+    # are to be force loaded. Hence the graph libraies are only built if the framework
+    # name is `MediaPipeTasksCommon`.`
     "MediaPipeTasksCommon")
       local IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND="-c opt --config=ios_sim_fat --apple_generate_dsym=false --define OPENCV=source //mediapipe/tasks/ios:MediaPipeTaskGraphs_library"
       ${BAZEL} build ${IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND}
@@ -128,13 +128,13 @@ function build_ios_frameworks_and_libraries {
     # This section is for internal purposes only.
     "MediaPipeTasksGenAIC")
       if [[ ! -z ${ENABLE_ODML_COCOAPODS_BUILD+x} ]]; then
-        local IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND="-c opt --config=ios_sim_fat --apple_generate_dsym=false //mediapipe/tasks/ios:MediaPipeTasksGenAI_library"
+        local IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND="-c opt --config=ios_sim_fat --apple_generate_dsym=false //mediapipe/tasks/ios:MediaPipeTasksGenAIC_library"
         ${BAZEL} build ${IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND}
         IOS_GENAI_SIMULATOR_LIBRARY_PATH="$(get_output_file_path "${IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND}")"
 
         # Build static library for iOS devices with arch ios_arm64. We don't need to build for armv7 since
         # our deployment target is iOS 12.0. iOS 12.0 and upwards is not supported by old armv7 devices.
-        local IOS_DEVICE_LIBRARY_CQUERY_COMMAND="-c opt --config=ios_arm64 --apple_generate_dsym=false //mediapipe/tasks/ios:MediaPipeTasksGenAI_library"
+        local IOS_DEVICE_LIBRARY_CQUERY_COMMAND="-c opt --config=ios_arm64 --apple_generate_dsym=false //mediapipe/tasks/ios:MediaPipeTasksGenAIC_library"
         ${BAZEL} build ${IOS_DEVICE_LIBRARY_CQUERY_COMMAND}
         IOS_GENAI_DEVICE_LIBRARY_PATH="$(get_output_file_path "${IOS_DEVICE_LIBRARY_CQUERY_COMMAND}")"
       fi
