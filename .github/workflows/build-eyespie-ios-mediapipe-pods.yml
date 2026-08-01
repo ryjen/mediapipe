@@ -194,20 +194,14 @@ jobs:
 
           common_sim=/tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_simulator_graph.a
           common_device=/tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_device_graph.a
-          genaic_sim=/tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a
-          genaic_device=/tmp/mediapipe-pod-validation/MediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a
-
-          for library in "${common_sim}" "${common_device}" "${genaic_sim}" "${genaic_device}"; do
+          for library in "${common_sim}" "${common_device}"; do
             test -f "${library}"
             file "${library}"
           done
 
           assert_arch "${common_sim}" arm64
           assert_arch "${common_sim}" x86_64
-          assert_arch "${genaic_sim}" arm64
-          assert_arch "${genaic_sim}" x86_64
           test "$(lipo -archs "${common_device}")" = "arm64"
-          test "$(lipo -archs "${genaic_device}")" = "arm64"
 
       - name: Validate podspec serialization
         shell: bash

@@ -17,11 +17,6 @@ Pod::Spec.new do |spec|
     :http => base_url ? "#{base_url}/#{archive}" : "https://github.com/ryjen/mediapipe/releases/download/#{tag}/#{archive}"
   }
 
-  spec.user_target_xcconfig = {
-    "OTHER_LDFLAGS[sdk=iphonesimulator*]" => "$(inherited) -force_load \"$(PODS_ROOT)/EyespieMediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_simulator.a\"",
-    "OTHER_LDFLAGS[sdk=iphoneos*]" => "$(inherited) -force_load \"$(PODS_ROOT)/EyespieMediaPipeTasksGenAIC/frameworks/genai_libraries/libMediaPipeTasksGenAIC_device.a\""
-  }
-  spec.preserve_paths = "frameworks/genai_libraries/*.a"
   spec.frameworks = "Accelerate", "CoreVideo", "Metal", "OpenGLES"
   spec.library = "c++"
   spec.vendored_frameworks = "frameworks/MediaPipeTasksGenAIC.xcframework"

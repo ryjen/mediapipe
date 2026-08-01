@@ -125,20 +125,6 @@ function build_ios_frameworks_and_libraries {
       ${BAZEL} build ${IOS_DEVICE_LIBRARY_CQUERY_COMMAND}
       IOS_GRAPHS_DEVICE_LIBRARY_PATH="$(get_output_file_path "${IOS_DEVICE_LIBRARY_CQUERY_COMMAND}")"
       ;;
-    # This section is for internal purposes only.
-    "MediaPipeTasksGenAIC")
-      if [[ ! -z ${ENABLE_ODML_COCOAPODS_BUILD+x} ]]; then
-        local IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND="-c opt --config=ios_sim_fat --apple_generate_dsym=false //mediapipe/tasks/ios:MediaPipeTasksGenAIC_library"
-        ${BAZEL} build ${IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND}
-        IOS_GENAI_SIMULATOR_LIBRARY_PATH="$(get_output_file_path "${IOS_SIM_FAT_LIBRARY_CQUERY_COMMAND}")"
-
-        # Build static library for iOS devices with arch ios_arm64. We don't need to build for armv7 since
-        # our deployment target is iOS 12.0. iOS 12.0 and upwards is not supported by old armv7 devices.
-        local IOS_DEVICE_LIBRARY_CQUERY_COMMAND="-c opt --config=ios_arm64 --apple_generate_dsym=false //mediapipe/tasks/ios:MediaPipeTasksGenAIC_library"
-        ${BAZEL} build ${IOS_DEVICE_LIBRARY_CQUERY_COMMAND}
-        IOS_GENAI_DEVICE_LIBRARY_PATH="$(get_output_file_path "${IOS_DEVICE_LIBRARY_CQUERY_COMMAND}")"
-      fi
-      ;;
     *)
       ;;
   esac
@@ -180,26 +166,6 @@ function create_framework_archive {
       # Copy ios device library into a separate directory.
       echo ${IOS_GRAPHS_DEVICE_LIBRARY_PATH}
       cp "${IOS_GRAPHS_DEVICE_LIBRARY_PATH}" "${IOS_DEVICE_GRAPH_LIBRARY_PATH}"
-      ;;
-    # This section is for internal purposes only.
-    "MediaPipeTasksGenAIC")
-      if [[ ! -z ${ENABLE_ODML_COCOAPODS_BUILD+x} ]]; then
-        local GENAI_LIBRARIES_DIR="genai_libraries"
-        # Create the parent folder which will hold the genai libraries of all architectures.
-        mkdir -p "${FRAMEWORKS_DIR}/${GENAI_LIBRARIES_DIR}"
-
-        local SIMULATOR_GENAI_LIBRARY_PATH="${FRAMEWORKS_DIR}/${GENAI_LIBRARIES_DIR}/lib${FRAMEWORK_NAME}_simulator.a"
-
-        # Copy ios simulator fat library into a separate directory.
-        echo ${IOS_GENAI_SIMULATOR_LIBRARY_PATH}
-        cp "${IOS_GENAI_SIMULATOR_LIBRARY_PATH}" "${SIMULATOR_GENAI_LIBRARY_PATH}"
-
-        local IOS_DEVICE_GENAI_LIBRARY_PATH="${FRAMEWORKS_DIR}/${GENAI_LIBRARIES_DIR}/lib${FRAMEWORK_NAME}_device.a"
-
-        # Copy ios device library into a separate directory.
-        echo ${IOS_GENAI_DEVICE_LIBRARY_PATH}
-        cp "${IOS_GENAI_DEVICE_LIBRARY_PATH}" "${IOS_DEVICE_GENAI_LIBRARY_PATH}"
-      fi
       ;;
     *)
       ;;
