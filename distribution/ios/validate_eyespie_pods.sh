@@ -5,15 +5,23 @@ VERSION="${VERSION:-0.10.26.1}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 DIST_DIR="${REPO_ROOT}/dist/ios-pods"
 PODSPEC_DIR="${REPO_ROOT}/distribution/ios"
+LOG_DIR="${DIST_DIR}/consumer-logs"
 WORK_DIR="$(mktemp -d)"
-SERVER_LOG="${WORK_DIR}/http-server.log"
+SERVER_LOG="${LOG_DIR}/http-server.log"
+
+mkdir -p "${LOG_DIR}"
 
 cleanup() {
+  local status=$?
   if [[ -n "${server_pid:-}" ]]; then
     kill "${server_pid}" 2>/dev/null || true
   fi
-  cat "${SERVER_LOG}" 2>/dev/null || true
+  if ((status != 0)); then
+    echo "CocoaPods fixture HTTP server log:" >&2
+    tail -n 50 "${SERVER_LOG}" >&2 || true
+  fi
   rm -rf "${WORK_DIR}"
+  return "${status}"
 }
 trap cleanup EXIT
 
@@ -42,12 +50,18 @@ genai="${PODSPEC_DIR}/MediaPipeTasksGenAI.podspec"
 lint() {
   local name="$1"
   shift
-  local log="${WORK_DIR}/${name}.log"
+  local log="${LOG_DIR}/${name}.log"
 
-  POD_VERSION="${VERSION}" \
-  POD_RELEASE_TAG="eyespie-ios-v${VERSION}" \
-  POD_SOURCE_BASE_URL="${base_url}" \
-    pod spec lint "$@" --allow-warnings --verbose 2>&1 | tee "${log}"
+  echo "==> Validating ${name} CocoaPods consumer"
+  if ! env \
+    POD_VERSION="${VERSION}" \
+    POD_RELEASE_TAG="eyespie-ios-v${VERSION}" \
+    POD_SOURCE_BASE_URL="${base_url}" \
+      pod spec lint "$@" --allow-warnings --verbose >"${log}" 2>&1; then
+    echo "CocoaPods validation failed for ${name}; final log follows." >&2
+    tail -n 200 "${log}" >&2 || true
+    return 1
+  fi
 
   local unexpected_warnings
   unexpected_warnings="$({
@@ -57,8 +71,12 @@ lint() {
   if [[ -n "${unexpected_warnings}" ]]; then
     echo "Unexpected CocoaPods lint warnings for ${name}:" >&2
     echo "${unexpected_warnings}" >&2
+    echo "Final log follows." >&2
+    tail -n 200 "${log}" >&2 || true
     return 1
   fi
+
+  echo "CocoaPods validation passed for ${name}"
 }
 
 lint common "${common}"
