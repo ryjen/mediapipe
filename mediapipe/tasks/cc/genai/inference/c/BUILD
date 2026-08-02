@@ -32,7 +32,10 @@ cc_library(
     # llm_inference_engine_ios.h for iOS, but those files are not published.
     # Build the available CPU implementation consistently on every platform.
     srcs = ["llm_inference_engine_cpu.cc"],
-    hdrs = ["llm_inference_engine.h"],
+    hdrs = ["llm_inference_engine.h"] + select({
+        "@org_tensorflow//tensorflow:ios": ["llm_inference_engine_ios.h"],
+        "//conditions:default": [],
+    }),
     tags = ["swift_module=MediaPipeTasksGenAIC"],
     deps = [
         "//mediapipe/framework/deps:file_path",
@@ -63,7 +66,12 @@ cc_library(
         "@org_tensorflow//tensorflow/lite/delegates/xnnpack:xnnpack_delegate_hdrs_only",
         "@org_tensorflow//tensorflow/lite/experimental/genai:genai_ops",
         "@org_tensorflow//tensorflow/lite/kernels:builtin_ops",
-    ],
+    ] + select({
+        "@org_tensorflow//tensorflow:ios": [
+            "//third_party/apple_frameworks:CoreGraphics",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 cc_binary(

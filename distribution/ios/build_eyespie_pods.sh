@@ -20,6 +20,7 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
+changed = False
 old = """int LlmInferenceEngine_CreateEngine(const LlmModelSettings* model_settings,
                                     LlmInferenceEngine_Session** engine_out,
                                     char** error_msg) {"""
@@ -27,11 +28,50 @@ new = """int LlmInferenceEngine_CreateEngine(const LlmModelSettings* model_setti
                                     LlmInferenceEngine_Engine** engine_out,
                                     char** error_msg) {"""
 
-if text.count(new) == 1 and old not in text:
-    raise SystemExit(0)
-if text.count(old) != 1:
+if text.count(old) == 1 and new not in text:
+    text = text.replace(old, new)
+    changed = True
+elif text.count(new) != 1 or old in text:
     raise SystemExit("Unexpected public GenAI CPU CreateEngine signature")
-path.write_text(text.replace(old, new), encoding="utf-8")
+
+generic_header = '#include "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine.h"\n'
+ios_header = """#if defined(__APPLE__)
+#include "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h"
+#endif
+"""
+if ios_header not in text:
+    if text.count(generic_header) != 1:
+        raise SystemExit("Unexpected public GenAI CPU header include")
+    text = text.replace(generic_header, generic_header + ios_header)
+    changed = True
+
+add_image = """ODML_EXPORT int LlmInferenceEngine_Session_AddImage(
+    LlmInferenceEngine_Session* session, const void* sk_bitmap,
+    char** error_msg) {
+  *error_msg = strdup("Not implemented");
+  return 12;
+}
+"""
+add_cg_image = """
+#if defined(__APPLE__)
+ODML_EXPORT int LlmInferenceEngine_Session_AddCgImage(
+    LlmInferenceEngine_Session* session, CGImageRef image, char** error_msg) {
+  if (error_msg) {
+    *error_msg = strdup(
+        "CGImage input is unavailable in the public CPU-only iOS build.");
+  }
+  return static_cast<int>(absl::StatusCode::kUnimplemented);
+}
+#endif
+"""
+if add_cg_image not in text:
+    if text.count(add_image) != 1:
+        raise SystemExit("Unexpected public GenAI CPU AddImage implementation")
+    text = text.replace(add_image, add_image + add_cg_image)
+    changed = True
+
+if changed:
+    path.write_text(text, encoding="utf-8")
 PY
 }
 
@@ -106,6 +146,7 @@ changed_paths_sha256=${CHANGED_PATHS_SHA256}
 distribution_version=${VERSION}
 hermetic_python_version=${HERMETIC_PYTHON_VERSION}
 genai_backend=public_cpu_only
+genai_cgimage_input=unsupported
 runner_os=${RUNNER_OS:-unknown}
 runner_arch=${RUNNER_ARCH:-unknown}
 runner_image=${ImageOS:-unknown}

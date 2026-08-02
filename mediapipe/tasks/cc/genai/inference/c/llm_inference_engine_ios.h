@@ -15,11 +15,25 @@
 #ifndef MEDIAPIPE_TASKS_GENAI_INFERENCE_C_LLM_INFERENCE_ENGINE_IOS_H_
 #define MEDIAPIPE_TASKS_GENAI_INFERENCE_C_LLM_INFERENCE_ENGINE_IOS_H_
 
+#include <CoreGraphics/CoreGraphics.h>
+
 // The public v0.10.26 source distribution references an iOS-specific header
-// that is not included in the tag. The public Swift API uses declarations from
-// llm_inference_engine.h, so this compatibility header preserves the exported
-// XCFramework layout while the custom distribution uses the available CPU
-// implementation.
+// that is not included in the tag. This compatibility header preserves the
+// exported XCFramework API while the custom distribution uses the available
+// CPU implementation. CGImage input remains unsupported by that backend.
 #include "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Adds a CGImage to the session. The public CPU-only implementation returns
+// kUnimplemented because the iOS multimodal backend is not published.
+ODML_EXPORT int LlmInferenceEngine_Session_AddCgImage(
+    LlmInferenceEngine_Session* session, CGImageRef image, char** error_msg);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
 
 #endif  // MEDIAPIPE_TASKS_GENAI_INFERENCE_C_LLM_INFERENCE_ENGINE_IOS_H_
