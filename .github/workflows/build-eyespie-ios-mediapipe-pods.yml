@@ -227,6 +227,7 @@ jobs:
             dist/ios-pods/provenance.txt
             dist/ios-pods/setup.log
             dist/ios-pods/build-logs/*.log
+            dist/ios-pods/consumer-logs/*.log
             distribution/ios/*.podspec
             mediapipe/tasks/cc/genai/inference/c/BUILD
             mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h
