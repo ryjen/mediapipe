@@ -63,17 +63,19 @@ stage_pod() {
 }
 
 lint() {
-  local name="$1"
-  local podspec="$2"
-  shift 2
+  local mode="$1"
+  local name="$2"
+  local podspec="$3"
+  shift 3
   local log="${LOG_DIR}/${name}.log"
+  local -a command=(pod "${mode}" lint "${podspec}")
 
   echo "==> Validating ${name} CocoaPods consumer"
   if ! env \
     POD_VERSION="${VERSION}" \
     POD_RELEASE_TAG="eyespie-ios-v${VERSION}" \
     POD_SOURCE_BASE_URL="${base_url}" \
-      pod lib lint "${podspec}" "$@" --allow-warnings --verbose >"${log}" 2>&1; then
+      "${command[@]}" "$@" --allow-warnings --verbose >"${log}" 2>&1; then
     echo "CocoaPods validation failed for ${name}; final log follows." >&2
     tail -n 200 "${log}" >&2 || true
     return 1
@@ -100,19 +102,23 @@ lint() {
   echo "CocoaPods validation passed for ${name}"
 }
 
-# `pod spec lint` cannot resolve unpublished sibling podspecs. Stage each
-# candidate archive and use `pod lib lint`; ancillary podspecs are supplied
-# through `--external-podspecs`, which CocoaPods resolves via each spec's
-# declared HTTP source.
-common_staged="$(stage_pod MediaPipeTasksCommon "${common}")"
+# Leaf binary pods must use `pod spec lint`, matching a production install from
+# their declared archive. In particular, Common's user target linker flags point
+# into $(PODS_ROOT), which is correct for an installed pod but not for a
+# development pod created by `pod lib lint`.
+#
+# Dependent and combined fixtures use `pod lib lint` so unpublished sibling
+# podspecs can be supplied through CocoaPods' supported `--external-podspecs`
+# option. Their own staged archive contents remain the development pod source;
+# sibling binary pods are installed normally from the fixture HTTP server.
+lint spec common "${common}"
+lint spec genaic "${genaic}"
+
 vision_staged="$(stage_pod MediaPipeTasksVision "${vision}")"
-genaic_staged="$(stage_pod MediaPipeTasksGenAIC "${genaic}")"
 genai_staged="$(stage_pod MediaPipeTasksGenAI "${genai}")"
 
-lint common "${common_staged}"
-lint vision "${vision_staged}" --external-podspecs="${common}"
-lint genaic "${genaic_staged}"
-lint genai "${genai_staged}" --external-podspecs="${genaic}"
+lint lib vision "${vision_staged}" --external-podspecs="${common}"
+lint lib genai "${genai_staged}" --external-podspecs="${genaic}"
 
 smoke_payload="${WORK_DIR}/smoke-payload"
 mkdir -p "${smoke_payload}/Sources"
@@ -152,5 +158,5 @@ RUBY
 tar -czf "${DIST_DIR}/EyespieMediaPipeIntegrationSmoke-${VERSION}.tar.gz" \
   -C "${smoke_payload}" .
 
-lint combined "${smoke_podspec}" \
+lint lib combined "${smoke_podspec}" \
   --external-podspecs="${PODSPEC_DIR}/*.podspec"
