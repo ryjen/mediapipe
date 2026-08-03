@@ -15,6 +15,7 @@ cleanup() {
   local status=$?
   if [[ -n "${server_pid:-}" ]]; then
     kill "${server_pid}" 2>/dev/null || true
+    wait "${server_pid}" 2>/dev/null || true
   fi
   if ((status != 0)); then
     echo "CocoaPods fixture HTTP server log:" >&2
@@ -38,9 +39,12 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory "${DIST_DIR}" \
 server_pid=$!
 base_url="http://127.0.0.1:8765"
 
-curl --fail --silent --show-error \
+if ! curl --fail --silent \
   --retry 10 --retry-connrefused --retry-delay 1 \
-  "${base_url}/MediaPipeTasksCommon-${VERSION}.tar.gz" >/dev/null
+  "${base_url}/MediaPipeTasksCommon-${VERSION}.tar.gz" >/dev/null; then
+  echo "CocoaPods fixture HTTP server failed to become ready." >&2
+  exit 1
+fi
 
 common="${PODSPEC_DIR}/EyespieMediaPipeTasksCommon.podspec"
 vision="${PODSPEC_DIR}/EyespieMediaPipeTasksVision.podspec"
@@ -64,10 +68,15 @@ lint() {
   fi
 
   local unexpected_warnings
-  unexpected_warnings="$({
-    grep -E '^[[:space:]]*-[[:space:]]+WARN[[:space:]]+\|' "${log}" |
-      grep -Ev 'user_target_xcconfig' || true
-  })"
+  unexpected_warnings="$(
+    awk -v base_url="${base_url}" '
+      /^[[:space:]]*-[[:space:]]+WARN[[:space:]]+\|/ {
+        if (index($0, "user_target_xcconfig") != 0) next
+        if (index($0, "| http:") != 0 && index($0, base_url "/") != 0) next
+        print
+      }
+    ' "${log}"
+  )"
   if [[ -n "${unexpected_warnings}" ]]; then
     echo "Unexpected CocoaPods lint warnings for ${name}:" >&2
     echo "${unexpected_warnings}" >&2
