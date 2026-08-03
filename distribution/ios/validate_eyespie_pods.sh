@@ -51,9 +51,21 @@ vision="${PODSPEC_DIR}/EyespieMediaPipeTasksVision.podspec"
 genaic="${PODSPEC_DIR}/EyespieMediaPipeTasksGenAIC.podspec"
 genai="${PODSPEC_DIR}/EyespieMediaPipeTasksGenAI.podspec"
 
+stage_pod() {
+  local archive="$1"
+  local podspec="$2"
+  local root="${WORK_DIR}/staged/${archive}"
+
+  mkdir -p "${root}"
+  tar -xzf "${DIST_DIR}/${archive}-${VERSION}.tar.gz" -C "${root}"
+  cp "${podspec}" "${root}/$(basename "${podspec}")"
+  printf '%s\n' "${root}/$(basename "${podspec}")"
+}
+
 lint() {
   local name="$1"
-  shift
+  local podspec="$2"
+  shift 2
   local log="${LOG_DIR}/${name}.log"
 
   echo "==> Validating ${name} CocoaPods consumer"
@@ -61,7 +73,7 @@ lint() {
     POD_VERSION="${VERSION}" \
     POD_RELEASE_TAG="eyespie-ios-v${VERSION}" \
     POD_SOURCE_BASE_URL="${base_url}" \
-      pod spec lint "$@" --allow-warnings --verbose >"${log}" 2>&1; then
+      pod lib lint "${podspec}" "$@" --allow-warnings --verbose >"${log}" 2>&1; then
     echo "CocoaPods validation failed for ${name}; final log follows." >&2
     tail -n 200 "${log}" >&2 || true
     return 1
@@ -88,10 +100,19 @@ lint() {
   echo "CocoaPods validation passed for ${name}"
 }
 
-lint common "${common}"
-lint vision "${vision}" --include-podspecs="${common}"
-lint genaic "${genaic}"
-lint genai "${genai}" --include-podspecs="${genaic}"
+# `pod spec lint` cannot resolve unpublished sibling podspecs. Stage each
+# candidate archive and use `pod lib lint`; ancillary podspecs are supplied
+# through `--external-podspecs`, which CocoaPods resolves via each spec's
+# declared HTTP source.
+common_staged="$(stage_pod MediaPipeTasksCommon "${common}")"
+vision_staged="$(stage_pod MediaPipeTasksVision "${vision}")"
+genaic_staged="$(stage_pod MediaPipeTasksGenAIC "${genaic}")"
+genai_staged="$(stage_pod MediaPipeTasksGenAI "${genai}")"
+
+lint common "${common_staged}"
+lint vision "${vision_staged}" --external-podspecs="${common}"
+lint genaic "${genaic_staged}"
+lint genai "${genai_staged}" --external-podspecs="${genaic}"
 
 smoke_payload="${WORK_DIR}/smoke-payload"
 mkdir -p "${smoke_payload}/Sources"
@@ -106,10 +127,7 @@ public enum MediaPipeIntegrationSmoke {
 }
 SWIFT
 
-tar -czf "${DIST_DIR}/EyespieMediaPipeIntegrationSmoke-${VERSION}.tar.gz" \
-  -C "${smoke_payload}" .
-
-smoke_podspec="${WORK_DIR}/EyespieMediaPipeIntegrationSmoke.podspec"
+smoke_podspec="${smoke_payload}/EyespieMediaPipeIntegrationSmoke.podspec"
 cat > "${smoke_podspec}" <<RUBY
 Pod::Spec.new do |spec|
   spec.name = "EyespieMediaPipeIntegrationSmoke"
@@ -131,5 +149,8 @@ Pod::Spec.new do |spec|
 end
 RUBY
 
+tar -czf "${DIST_DIR}/EyespieMediaPipeIntegrationSmoke-${VERSION}.tar.gz" \
+  -C "${smoke_payload}" .
+
 lint combined "${smoke_podspec}" \
-  --include-podspecs="${PODSPEC_DIR}/*.podspec"
+  --external-podspecs="${PODSPEC_DIR}/*.podspec"
