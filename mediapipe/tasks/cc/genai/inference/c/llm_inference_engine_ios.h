@@ -21,7 +21,11 @@
 // that is not included in the tag. This compatibility header preserves the
 // exported XCFramework API while the custom distribution uses the available
 // CPU implementation. CGImage input remains unsupported by that backend.
-#include "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine.h"
+//
+// Use the sibling include name rather than the source-tree-qualified Bazel
+// path. Both headers are flattened into the XCFramework Headers directory, so
+// the qualified path is unavailable to downstream CocoaPods consumers.
+#include "llm_inference_engine.h"
 
 #ifdef __cplusplus
 extern "C" {
