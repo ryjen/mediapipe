@@ -42,10 +42,10 @@ curl --fail --silent --show-error \
   --retry 10 --retry-connrefused --retry-delay 1 \
   "${base_url}/MediaPipeTasksCommon-${VERSION}.tar.gz" >/dev/null
 
-common="${PODSPEC_DIR}/MediaPipeTasksCommon.podspec"
-vision="${PODSPEC_DIR}/MediaPipeTasksVision.podspec"
-genaic="${PODSPEC_DIR}/MediaPipeTasksGenAIC.podspec"
-genai="${PODSPEC_DIR}/MediaPipeTasksGenAI.podspec"
+common="${PODSPEC_DIR}/EyespieMediaPipeTasksCommon.podspec"
+vision="${PODSPEC_DIR}/EyespieMediaPipeTasksVision.podspec"
+genaic="${PODSPEC_DIR}/EyespieMediaPipeTasksGenAIC.podspec"
+genai="${PODSPEC_DIR}/EyespieMediaPipeTasksGenAI.podspec"
 
 lint() {
   local name="$1"
