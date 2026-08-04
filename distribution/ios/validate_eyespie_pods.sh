@@ -102,23 +102,21 @@ lint() {
   echo "CocoaPods validation passed for ${name}"
 }
 
-# Leaf binary pods must use `pod spec lint`, matching a production install from
-# their declared archive. In particular, Common's user target linker flags point
-# into $(PODS_ROOT), which is correct for an installed pod but not for a
-# development pod created by `pod lib lint`.
-#
-# Dependent and combined fixtures use `pod lib lint` so unpublished sibling
-# podspecs can be supplied through CocoaPods' supported `--external-podspecs`
-# option. Their own staged archive contents remain the development pod source;
-# sibling binary pods are installed normally from the fixture HTTP server.
+# Common is the sole owner of the TensorFlow Lite C runtime and retains the
+# production-equivalent `pod spec lint` path because its graph linker flags point
+# into $(PODS_ROOT). Dependent binary pods are staged as development pods so
+# unpublished sibling podspecs can be supplied through `--external-podspecs`;
+# their binary dependencies are still installed from the fixture HTTP server.
 lint spec common "${common}"
-lint spec genaic "${genaic}"
 
 vision_staged="$(stage_pod MediaPipeTasksVision "${vision}")"
+genaic_staged="$(stage_pod MediaPipeTasksGenAIC "${genaic}")"
 genai_staged="$(stage_pod MediaPipeTasksGenAI "${genai}")"
 
 lint lib vision "${vision_staged}" --external-podspecs="${common}"
-lint lib genai "${genai_staged}" --external-podspecs="${genaic}"
+lint lib genaic "${genaic_staged}" --external-podspecs="${common}"
+lint lib genai "${genai_staged}" \
+  --external-podspecs="${PODSPEC_DIR}/*.podspec"
 
 smoke_payload="${WORK_DIR}/smoke-payload"
 mkdir -p "${smoke_payload}/Sources"
