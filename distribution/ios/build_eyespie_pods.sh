@@ -75,6 +75,47 @@ if changed:
 PY
 }
 
+prepare_shared_tflite_runtime_boundary() {
+  local build_file="${REPO_ROOT}/mediapipe/tasks/ios/BUILD"
+
+  python3 - "${build_file}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = '''apple_static_xcframework(
+    name = "MediaPipeTasksGenAIC_framework",
+    bundle_name = "MediaPipeTasksGenAIC",
+'''
+new = '''apple_static_xcframework(
+    name = "MediaPipeTasksGenAIC_framework",
+    # Common is the single owner of the TensorFlow Lite C runtime. Excluding
+    # these transitive objects prevents duplicate Objective-C and C symbols
+    # when Vision/Common and GenAI/GenAIC are linked into the same app.
+    avoid_deps = TENSORFLOW_LITE_C_DEPS,
+    bundle_name = "MediaPipeTasksGenAIC",
+'''
+old_deps = '''    # Including here the deps that were in avoid_deps in MediaPipeTasksGenAI_library.
+    deps = TENSORFLOW_LITE_C_DEPS + [
+        "//mediapipe/tasks/cc/genai/inference/c:libllm_inference_engine_cpu",
+    ],
+'''
+new_deps = '''    deps = [
+        "//mediapipe/tasks/cc/genai/inference/c:libllm_inference_engine_cpu",
+    ],
+'''
+
+if text.count(old) != 1:
+    raise SystemExit("Unexpected MediaPipeTasksGenAIC framework declaration")
+if text.count(old_deps) != 1:
+    raise SystemExit("Unexpected MediaPipeTasksGenAIC dependency declaration")
+
+text = text.replace(old, new).replace(old_deps, new_deps)
+path.write_text(text, encoding="utf-8")
+PY
+}
+
 build_framework() {
   local framework="$1"
   local destination="${WORK_ROOT}/${framework}"
@@ -119,6 +160,7 @@ build_framework() {
 
 cd "${REPO_ROOT}"
 prepare_public_genai_cpu_source
+prepare_shared_tflite_runtime_boundary
 
 for framework in \
   MediaPipeTasksCommon \
@@ -147,6 +189,8 @@ distribution_version=${VERSION}
 hermetic_python_version=${HERMETIC_PYTHON_VERSION}
 genai_backend=public_cpu_only
 genai_cgimage_input=unsupported
+tflite_runtime_owner=MediaPipeTasksCommon
+genaic_tflite_runtime=external_common_dependency
 runner_os=${RUNNER_OS:-unknown}
 runner_arch=${RUNNER_ARCH:-unknown}
 runner_image=${ImageOS:-unknown}
