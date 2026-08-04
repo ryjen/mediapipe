@@ -62,6 +62,18 @@ stage_pod() {
   printf '%s\n' "${root}/$(basename "${podspec}")"
 }
 
+stage_external_podspecs() {
+  local name="$1"
+  shift
+  local root="${WORK_DIR}/external-podspecs/${name}"
+
+  mkdir -p "${root}"
+  for podspec in "$@"; do
+    cp "${podspec}" "${root}/$(basename "${podspec}")"
+  done
+  printf '%s\n' "${root}/*.podspec"
+}
+
 lint() {
   local mode="$1"
   local name="$2"
@@ -115,8 +127,14 @@ genai_staged="$(stage_pod MediaPipeTasksGenAI "${genai}")"
 
 lint lib vision "${vision_staged}" --external-podspecs="${common}"
 lint lib genaic "${genaic_staged}" --external-podspecs="${common}"
+
+# Do not pass GenAI's own podspec through `--external-podspecs`: `pod lib lint`
+# already treats the staged GenAI podspec as the development pod source, and
+# CocoaPods rejects the same pod name when it also appears as an external source.
+# Only its unpublished dependency chain is staged here.
+genai_external_podspecs="$(stage_external_podspecs genai "${common}" "${genaic}")"
 lint lib genai "${genai_staged}" \
-  --external-podspecs="${PODSPEC_DIR}/*.podspec"
+  --external-podspecs="${genai_external_podspecs}"
 
 smoke_payload="${WORK_DIR}/smoke-payload"
 mkdir -p "${smoke_payload}/Sources"
