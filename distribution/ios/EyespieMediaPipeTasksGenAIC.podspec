@@ -17,6 +17,9 @@ Pod::Spec.new do |spec|
     :http => base_url ? "#{base_url}/#{archive}" : "https://github.com/ryjen/mediapipe/releases/download/#{tag}/#{archive}"
   }
 
+  # Common owns the shared TensorFlow Lite C runtime. GenAIC excludes those
+  # objects from its static XCFramework and resolves them through this pod.
+  spec.dependency "EyespieMediaPipeTasksCommon", "= #{spec.version}"
   spec.frameworks = "Accelerate", "CoreVideo", "Metal", "OpenGLES"
   spec.library = "c++"
   spec.vendored_frameworks = "frameworks/MediaPipeTasksGenAIC.xcframework"
