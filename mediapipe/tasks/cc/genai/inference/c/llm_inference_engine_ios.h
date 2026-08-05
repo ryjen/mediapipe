@@ -36,6 +36,15 @@ extern "C" {
 ODML_EXPORT int LlmInferenceEngine_Session_AddCgImage(
     LlmInferenceEngine_Session* session, CGImageRef image, char** error_msg);
 
+// Eyespie distribution capability contract. These symbols are intentionally
+// namespaced so consumers can distinguish the custom public-source fallback
+// from Google's complete binary distribution.
+ODML_EXPORT int EyespieMediaPipeGenAI_CapabilitySchemaVersion(void);
+ODML_EXPORT const char* EyespieMediaPipeGenAI_Backend(void);
+ODML_EXPORT int EyespieMediaPipeGenAI_SupportsTextGeneration(void);
+ODML_EXPORT int EyespieMediaPipeGenAI_SupportsCgImageInput(void);
+ODML_EXPORT int EyespieMediaPipeGenAI_SupportsGpuAcceleration(void);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
