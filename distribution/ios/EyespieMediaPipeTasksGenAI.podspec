@@ -5,7 +5,12 @@ Pod::Spec.new do |spec|
   spec.license = { :type => "Apache", :file => "LICENSE" }
   spec.homepage = "https://github.com/ryjen/mediapipe"
   spec.summary = "MediaPipe Task Library - Gen AI"
-  spec.description = "The Gen AI APIs of the MediaPipe Task Library, built from upstream v0.10.26."
+  spec.description = <<-DESC
+    The Gen AI APIs of the MediaPipe Task Library, built from upstream v0.10.26.
+    This Eyespie distribution uses the public CPU-only iOS implementation and
+    ships an explicit capability contract; GPU acceleration and CGImage input
+    are not supported by this build.
+  DESC
   spec.ios.deployment_target = "15.0"
   spec.swift_version = "6.0"
   spec.module_name = "MediaPipeTasksGenAI"
@@ -19,5 +24,8 @@ Pod::Spec.new do |spec|
   }
 
   spec.dependency "EyespieMediaPipeTasksGenAIC", "= #{spec.version}"
+  spec.resource_bundles = {
+    "EyespieMediaPipeTasksGenAICapabilities" => ["capabilities/*.json"]
+  }
   spec.vendored_frameworks = "frameworks/MediaPipeTasksGenAI.xcframework"
 end
