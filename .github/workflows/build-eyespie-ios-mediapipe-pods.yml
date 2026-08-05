@@ -1,0 +1,238 @@
+name: Build Eyespie iOS MediaPipe Pods
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
+      - "distribution/ios/**"
+      - "mediapipe/tasks/cc/genai/inference/c/BUILD"
+      - "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h"
+      - "mediapipe/tasks/ios/build_ios_framework.sh"
+      - "third_party/zlib.diff"
+      - "third_party/opencv_ios_source.BUILD"
+  push:
+    branches:
+      - eyespie/ios-pods-0.10.26
+    paths:
+      - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
+      - "distribution/ios/**"
+      - "mediapipe/tasks/cc/genai/inference/c/BUILD"
+      - "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h"
+      - "mediapipe/tasks/ios/build_ios_framework.sh"
+      - "third_party/zlib.diff"
+      - "third_party/opencv_ios_source.BUILD"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-consume:
+    runs-on: macos-15
+    timeout-minutes: 240
+    env:
+      VERSION: 0.10.26.1
+      POD_RELEASE_TAG: eyespie-ios-v0.10.26.1
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify immutable source baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline="$(git rev-list -n 1 v0.10.26)"
+          merge_base="$(git merge-base HEAD v0.10.26)"
+          test "${merge_base}" = "${baseline}"
+
+          unexpected="$({
+            git diff --name-only v0.10.26...HEAD |
+              grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/.*|mediapipe/tasks/cc/genai/inference/c/BUILD|mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios\.h|mediapipe/tasks/ios/build_ios_framework\.sh|third_party/zlib\.diff|third_party/opencv_ios_source\.BUILD)$' || true
+          })"
+          if [[ -n "${unexpected}" ]]; then
+            echo "Unexpected source changes outside the distribution boundary:" >&2
+            echo "${unexpected}" >&2
+            exit 1
+          fi
+
+      - name: Select Xcode 16.4
+        shell: bash
+        run: |
+          set -euo pipefail
+          developer_dir="/Applications/Xcode_16.4.app/Contents/Developer"
+          test -d "${developer_dir}"
+          sudo xcode-select --switch "${developer_dir}"
+          test "$(xcodebuild -version | head -n 1)" = "Xcode 16.4"
+
+      - name: Capture Apple toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcrun clang --version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          ruby --version
+          pod --version
+          df -h
+
+      - name: Configure Bazelisk, Python, CMake, and CocoaPods
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/ios-pods
+          {
+            set -x
+            command -v bazelisk >/dev/null || brew install bazelisk
+            command -v pod >/dev/null || brew install cocoapods
+            brew list --versions python@3.11 >/dev/null || brew install python@3.11
+
+            tool_bin="${RUNNER_TEMP}/eyespie-tools"
+            mkdir -p "${tool_bin}"
+            bazelisk_path="$(command -v bazelisk)"
+            printf '#!/usr/bin/env bash\nexec "%s" "$@"\n' "${bazelisk_path}" > "${tool_bin}/bazel"
+            chmod 0755 "${tool_bin}/bazel"
+            echo "${tool_bin}" >> "${GITHUB_PATH}"
+
+            python311_bin="$(brew --prefix python@3.11)/libexec/bin"
+            test -x "${python311_bin}/python3"
+            echo "${python311_bin}" >> "${GITHUB_PATH}"
+            export PATH="${python311_bin}:${tool_bin}:${PATH}"
+
+            cmake_venv="${RUNNER_TEMP}/cmake-3.24.0"
+            python3 -m venv "${cmake_venv}"
+            "${cmake_venv}/bin/python" -m pip install \
+              --disable-pip-version-check \
+              --no-cache-dir \
+              "cmake==3.24.0"
+            echo "${cmake_venv}/bin" >> "${GITHUB_PATH}"
+            export PATH="${cmake_venv}/bin:${PATH}"
+
+            test -x "${tool_bin}/bazel"
+            python3 --version
+            python3 -c 'import distutils; print(distutils.__file__)'
+            test "$(cmake --version | head -n 1)" = "cmake version 3.24.0"
+            pod --version
+          } 2>&1 | tee dist/ios-pods/setup.log
+
+      - name: Build Common, Vision, GenAIC, and GenAI
+        shell: bash
+        run: bash distribution/ios/build_eyespie_pods.sh
+
+      - name: Validate checksums, slices, and module maps
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist/ios-pods
+          shasum -a 256 --check SHA256SUMS
+
+          rm -rf /tmp/mediapipe-pod-validation
+          mkdir -p /tmp/mediapipe-pod-validation
+
+          for framework in MediaPipeTasksCommon MediaPipeTasksVision MediaPipeTasksGenAIC MediaPipeTasksGenAI; do
+            root="/tmp/mediapipe-pod-validation/${framework}"
+            mkdir -p "${root}"
+            tar -xzf "${framework}-${VERSION}.tar.gz" -C "${root}"
+            test -f "${root}/LICENSE"
+            test -d "${root}/frameworks/${framework}.xcframework"
+          done
+
+          python3 - <<'PY'
+          import pathlib
+          import plistlib
+          import subprocess
+
+          root = pathlib.Path('/tmp/mediapipe-pod-validation')
+          frameworks = (
+              'MediaPipeTasksCommon',
+              'MediaPipeTasksVision',
+              'MediaPipeTasksGenAIC',
+              'MediaPipeTasksGenAI',
+          )
+
+          for name in frameworks:
+              xcframework = root / name / 'frameworks' / f'{name}.xcframework'
+              with (xcframework / 'Info.plist').open('rb') as handle:
+                  metadata = plistlib.load(handle)
+
+              libraries = metadata.get('AvailableLibraries', [])
+              device = [entry for entry in libraries if entry.get('SupportedPlatform') == 'ios' and not entry.get('SupportedPlatformVariant')]
+              simulator = [entry for entry in libraries if entry.get('SupportedPlatform') == 'ios' and entry.get('SupportedPlatformVariant') == 'simulator']
+              assert device, f'{name}: missing iOS device slice'
+              assert simulator, f'{name}: missing iOS simulator slice'
+              assert any(set(entry.get('SupportedArchitectures', [])) == {'arm64'} for entry in device), f'{name}: device slice must be arm64'
+              assert any({'arm64', 'x86_64'}.issubset(set(entry.get('SupportedArchitectures', []))) for entry in simulator), f'{name}: simulator slice must contain arm64 and x86_64'
+
+              for entry in device + simulator:
+                  library = xcframework / entry['LibraryIdentifier'] / entry['LibraryPath']
+                  binary = library / name if library.is_dir() else library
+                  assert binary.exists(), f'{name}: missing binary {binary}'
+                  subprocess.run(['file', str(binary)], check=True)
+                  subprocess.run(['lipo', '-archs', str(binary)], check=True)
+
+                  if library.is_dir():
+                      module_map = library / 'Modules' / 'module.modulemap'
+                      assert module_map.exists(), f'{name}: missing module map {module_map}'
+          PY
+
+          assert_arch() {
+            local library="$1"
+            local required="$2"
+            local arches
+            arches="$(lipo -archs "${library}")"
+            grep -Eq "(^| )${required}( |$)" <<<"${arches}"
+          }
+
+          common_sim=/tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_simulator_graph.a
+          common_device=/tmp/mediapipe-pod-validation/MediaPipeTasksCommon/frameworks/graph_libraries/libMediaPipeTasksCommon_device_graph.a
+          for library in "${common_sim}" "${common_device}"; do
+            test -f "${library}"
+            file "${library}"
+          done
+
+          assert_arch "${common_sim}" arm64
+          assert_arch "${common_sim}" x86_64
+          test "$(lipo -archs "${common_device}")" = "arm64"
+
+      - name: Validate podspec serialization
+        shell: bash
+        run: |
+          set -euo pipefail
+          for podspec in distribution/ios/*.podspec; do
+            POD_VERSION="${VERSION}" POD_RELEASE_TAG="${POD_RELEASE_TAG}" \
+              pod ipc spec "${podspec}" >/tmp/"$(basename "${podspec}")".json
+          done
+
+      - name: Build individual and combined CocoaPods consumers
+        shell: bash
+        run: bash distribution/ios/validate_eyespie_pods.sh
+
+      - name: Upload candidate artifacts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mediapipe-ios-${{ env.VERSION }}-${{ github.run_attempt }}
+          path: |
+            dist/ios-pods/*.tar.gz
+            dist/ios-pods/SHA256SUMS
+            dist/ios-pods/provenance.txt
+            dist/ios-pods/setup.log
+            dist/ios-pods/build-logs/*.log
+            dist/ios-pods/consumer-logs/*.log
+            distribution/ios/*.podspec
+            mediapipe/tasks/cc/genai/inference/c/BUILD
+            mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h
+            mediapipe/tasks/ios/build_ios_framework.sh
+            third_party/zlib.diff
+            third_party/opencv_ios_source.BUILD
+          if-no-files-found: warn
+          retention-days: 14

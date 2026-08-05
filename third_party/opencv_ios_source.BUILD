@@ -25,33 +25,95 @@ exports_files(["LICENSE"])
 # for MediaPipe iOS Task libraries are built. Shipping with OPENCV built with
 # Swift support throws linker errors when the MediaPipe framework is used from
 # an iOS project.
-# When building on M1 Macs, cmake version cannot be higher than 3.24.0. This is
-# is mentioned in an open issue in the opencv github repo.
+#
+# OpenCV 4.5.3 predates modern CMake/Xcode cross-compilation behavior, and its
+# bundled zlib/libpng predates current Apple SDK headers. Build an isolated
+# source copy, inject static-library try-compile behavior through a scoped CMake
+# wrapper, and remove the obsolete bundled dependency Apple conditions. The
+# source edits are idempotent and fail closed against unexpected states.
 genrule(
     name = "build_opencv_xcframework",
     srcs = glob(["opencv-4.5.3/**"]),
     outs = ["opencv2.xcframework.zip"],
-    cmd = "&&".join([
-        "$(location opencv-4.5.3/platforms/apple/build_xcframework.py) \
-        --iphonesimulator_archs arm64,x86_64 \
-        --iphoneos_archs arm64 \
-        --without dnn \
-        --without ml \
-        --without stitching \
-        --without photo \
-        --without objdetect \
-        --without gapi \
-        --without flann \
-        --without highgui \
-        --without videoio \
-        --disable PROTOBUF \
-        --disable-bitcode \
-        --disable-swift \
-        --build_only_specified_archs \
-        --out $(@D)",
-        "cd $(@D)",
-        "zip --symlinks -r opencv2.xcframework.zip opencv2.xcframework",
-    ]),
+    cmd = """
+set -euo pipefail
+source_root="$$(cd "$$(dirname "$(location opencv-4.5.3/platforms/apple/build_xcframework.py)")/../.." && pwd)"
+patched_parent="$$(mktemp -d "$${TMPDIR:-/tmp}/opencv-4.5.3.XXXXXX")"
+cmake_wrapper_dir="$$(mktemp -d "$${TMPDIR:-/tmp}/opencv-cmake.XXXXXX")"
+trap 'rm -rf "$$patched_parent" "$$cmake_wrapper_dir"' EXIT
+cp -R "$$source_root" "$$patched_parent/opencv-4.5.3"
+chmod -R u+w "$$patched_parent/opencv-4.5.3"
+
+python3 - \
+  "$$patched_parent/opencv-4.5.3/3rdparty/zlib/zutil.h" \
+  "$$patched_parent/opencv-4.5.3/3rdparty/libpng/pngpriv.h" <<'PY'
+from pathlib import Path
+import sys
+
+zutil = Path(sys.argv[1])
+zutil_text = zutil.read_text(encoding="utf-8")
+legacy_zlib_condition = "#if defined(MACOS) || defined(TARGET_OS_MAC)"
+legacy_count = zutil_text.count(legacy_zlib_condition)
+if legacy_count == 1:
+    zutil_text = zutil_text.replace(legacy_zlib_condition, "#if defined(MACOS)")
+elif legacy_count > 1:
+    raise SystemExit(f"OpenCV bundled zlib legacy Apple condition count: {legacy_count}")
+elif "TARGET_OS_MAC" in zutil_text:
+    raise SystemExit("OpenCV bundled zlib contains unexpected TARGET_OS_MAC usage")
+zutil.write_text(zutil_text, encoding="utf-8")
+
+pngpriv = Path(sys.argv[2])
+pngpriv_lines = pngpriv.read_text(encoding="utf-8").splitlines(keepends=True)
+png_matches = [
+    index for index, line in enumerate(pngpriv_lines)
+    if "defined(__SC__)" in line
+]
+if len(png_matches) != 1:
+    raise SystemExit(f"OpenCV bundled libpng classic-Mac condition count: {len(png_matches)}")
+png_index = png_matches[0]
+if "defined(TARGET_OS_MAC)" in pngpriv_lines[png_index]:
+    pngpriv_lines[png_index] = pngpriv_lines[png_index].replace(" || defined(TARGET_OS_MAC)", "")
+elif pngpriv_lines[png_index].rstrip().endswith("||"):
+    raise SystemExit("OpenCV bundled libpng condition ended unexpectedly")
+pngpriv.write_text("".join(pngpriv_lines), encoding="utf-8")
+PY
+
+real_cmake="$$(command -v cmake)"
+cat > "$$cmake_wrapper_dir/cmake" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+for argument in "$$@"; do
+  if [[ "$$argument" == "-GXcode" ]]; then
+    exec "__REAL_CMAKE__" -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY "$$@"
+  fi
+done
+exec "__REAL_CMAKE__" "$$@"
+EOF
+sed -i.bak "s|__REAL_CMAKE__|$$real_cmake|g" "$$cmake_wrapper_dir/cmake"
+rm -f "$$cmake_wrapper_dir/cmake.bak"
+chmod 0755 "$$cmake_wrapper_dir/cmake"
+
+PATH="$$cmake_wrapper_dir:$$PATH" \
+"$$patched_parent/opencv-4.5.3/platforms/apple/build_xcframework.py" \
+  --iphonesimulator_archs arm64,x86_64 \
+  --iphoneos_archs arm64 \
+  --iphoneos_deployment_target 15.0 \
+  --without dnn \
+  --without ml \
+  --without stitching \
+  --without photo \
+  --without objdetect \
+  --without gapi \
+  --without highgui \
+  --without videoio \
+  --disable PROTOBUF \
+  --disable-bitcode \
+  --disable-swift \
+  --build_only_specified_archs \
+  --out "$(@D)"
+cd "$(@D)"
+zip --symlinks -r opencv2.xcframework.zip opencv2.xcframework
+""",
 )
 
 # Unzips `opencv2.xcframework.zip` built from source by `build_opencv_xcframework`
@@ -69,8 +131,7 @@ apple_static_xcframework_import(
     xcframework_imports = [":opencv2_unzipped_xcframework_files"],
 )
 
-# Filters the headers for each platform in `opencv2.xcframework` which will be
-# used as headers in a `cc_library` that can be linked to C++ targets.
+# Filters the headers for each platform in `opencv2.xcframework` which will be used as headers in a `cc_library` that can be linked to C++ targets.
 select_headers(
     name = "opencv_xcframework_device_headers",
     srcs = [":opencv_xcframework"],
