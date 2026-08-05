@@ -70,6 +70,35 @@ if add_cg_image not in text:
     text = text.replace(add_image, add_image + add_cg_image)
     changed = True
 
+capability_contract = """
+#if defined(__APPLE__)
+ODML_EXPORT int EyespieMediaPipeGenAI_CapabilitySchemaVersion(void) {
+  return 1;
+}
+
+ODML_EXPORT const char* EyespieMediaPipeGenAI_Backend(void) {
+  return "public_cpu_only";
+}
+
+ODML_EXPORT int EyespieMediaPipeGenAI_SupportsTextGeneration(void) {
+  return 1;
+}
+
+ODML_EXPORT int EyespieMediaPipeGenAI_SupportsCgImageInput(void) {
+  return 0;
+}
+
+ODML_EXPORT int EyespieMediaPipeGenAI_SupportsGpuAcceleration(void) {
+  return 0;
+}
+#endif
+"""
+if capability_contract not in text:
+    if text.count(add_cg_image) != 1:
+        raise SystemExit("Unexpected public GenAI CPU CGImage compatibility implementation")
+    text = text.replace(add_cg_image, add_cg_image + capability_contract)
+    changed = True
+
 if changed:
     path.write_text(text, encoding="utf-8")
 PY
@@ -158,6 +187,133 @@ build_framework() {
   bazelisk info output_base 2>/dev/null | xargs -I{} du -sh {} 2>/dev/null || true
 }
 
+package_genai_capabilities() {
+  local archive="${DIST_DIR}/MediaPipeTasksGenAI-${VERSION}.tar.gz"
+  local root="${WORK_ROOT}/MediaPipeTasksGenAI-capabilities"
+  local manifest="${root}/capabilities/EyespieMediaPipeGenAICapabilities.json"
+  local repacked="${archive}.tmp"
+
+  rm -rf "${root}"
+  mkdir -p "${root}/capabilities"
+  tar -xzf "${archive}" -C "${root}"
+
+  python3 - \
+    "${manifest}" \
+    "${VERSION}" \
+    "$(git rev-parse HEAD)" \
+    "$(git rev-list -n 1 v0.10.26)" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+manifest = Path(sys.argv[1])
+version = sys.argv[2]
+distribution_commit = sys.argv[3]
+upstream_commit = sys.argv[4]
+
+payload = {
+    "schema_version": 1,
+    "distribution": {
+        "name": "EyespieMediaPipeTasksGenAI",
+        "version": version,
+        "distribution_commit": distribution_commit,
+        "upstream_tag": "v0.10.26",
+        "upstream_commit": upstream_commit,
+    },
+    "platform": {
+        "minimum_ios": "15.0",
+        "device_architectures": ["arm64"],
+        "simulator_architectures": ["arm64", "x86_64"],
+    },
+    "backend": {
+        "identifier": "public_cpu_only",
+        "gpu_acceleration": False,
+    },
+    "features": {
+        "text_generation": {
+            "api_supported": True,
+            "tested_model_families": [],
+            "qualification": "pending_device_benchmarks",
+        },
+        "cgimage_input": {
+            "supported": False,
+            "error_code": "kUnimplemented",
+            "state_mutation_on_failure": False,
+        },
+    },
+    "upstream_references": [
+        "google-ai-edge/mediapipe#6234",
+        "google-ai-edge/mediapipe#6246",
+    ],
+}
+
+manifest.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+
+  tar -czf "${repacked}" -C "${root}" .
+  mv "${repacked}" "${archive}"
+}
+
+validate_genai_capability_contract() {
+  local root="${WORK_ROOT}/capability-validation"
+  rm -rf "${root}"
+  mkdir -p "${root}/GenAIC" "${root}/GenAI"
+  tar -xzf "${DIST_DIR}/MediaPipeTasksGenAIC-${VERSION}.tar.gz" -C "${root}/GenAIC"
+  tar -xzf "${DIST_DIR}/MediaPipeTasksGenAI-${VERSION}.tar.gz" -C "${root}/GenAI"
+
+  python3 - "${root}" "${VERSION}" "$(git rev-parse HEAD)" <<'PY'
+import json
+from pathlib import Path
+import plistlib
+import subprocess
+import sys
+
+root = Path(sys.argv[1])
+version = sys.argv[2]
+distribution_commit = sys.argv[3]
+
+manifest_path = root / "GenAI" / "capabilities" / "EyespieMediaPipeGenAICapabilities.json"
+manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+assert manifest["schema_version"] == 1
+assert manifest["distribution"]["name"] == "EyespieMediaPipeTasksGenAI"
+assert manifest["distribution"]["version"] == version
+assert manifest["distribution"]["distribution_commit"] == distribution_commit
+assert manifest["backend"] == {
+    "gpu_acceleration": False,
+    "identifier": "public_cpu_only",
+}
+assert manifest["features"]["text_generation"]["api_supported"] is True
+assert manifest["features"]["text_generation"]["tested_model_families"] == []
+assert manifest["features"]["cgimage_input"]["supported"] is False
+assert manifest["features"]["cgimage_input"]["error_code"] == "kUnimplemented"
+
+xcframework = root / "GenAIC" / "frameworks" / "MediaPipeTasksGenAIC.xcframework"
+with (xcframework / "Info.plist").open("rb") as handle:
+    metadata = plistlib.load(handle)
+
+required_symbols = (
+    "EyespieMediaPipeGenAI_CapabilitySchemaVersion",
+    "EyespieMediaPipeGenAI_Backend",
+    "EyespieMediaPipeGenAI_SupportsTextGeneration",
+    "EyespieMediaPipeGenAI_SupportsCgImageInput",
+    "EyespieMediaPipeGenAI_SupportsGpuAcceleration",
+)
+
+for entry in metadata.get("AvailableLibraries", []):
+    library = xcframework / entry["LibraryIdentifier"] / entry["LibraryPath"]
+    binary = library / "MediaPipeTasksGenAIC" if library.is_dir() else library
+    output = subprocess.check_output(["nm", "-gU", str(binary)], text=True)
+    for symbol in required_symbols:
+        assert f"_{symbol}" in output, f"{binary}: missing exported capability symbol {symbol}"
+
+    if library.is_dir():
+        header = library / "Headers" / "llm_inference_engine_ios.h"
+        header_text = header.read_text(encoding="utf-8")
+        for symbol in required_symbols:
+            assert symbol in header_text, f"{header}: missing capability declaration {symbol}"
+PY
+}
+
 cd "${REPO_ROOT}"
 prepare_public_genai_cpu_source
 prepare_shared_tflite_runtime_boundary
@@ -169,6 +325,9 @@ for framework in \
   MediaPipeTasksGenAI; do
   build_framework "${framework}"
 done
+
+package_genai_capabilities
+validate_genai_capability_contract
 
 (
   cd "${DIST_DIR}"
@@ -189,6 +348,8 @@ distribution_version=${VERSION}
 hermetic_python_version=${HERMETIC_PYTHON_VERSION}
 genai_backend=public_cpu_only
 genai_cgimage_input=unsupported
+genai_capability_schema_version=1
+genai_capability_manifest=capabilities/EyespieMediaPipeGenAICapabilities.json
 tflite_runtime_owner=MediaPipeTasksCommon
 genaic_tflite_runtime=external_common_dependency
 runner_os=${RUNNER_OS:-unknown}
