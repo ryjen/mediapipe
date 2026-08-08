@@ -11,17 +11,6 @@ on:
       - "mediapipe/tasks/ios/build_ios_framework.sh"
       - "third_party/zlib.diff"
       - "third_party/opencv_ios_source.BUILD"
-  push:
-    branches:
-      - eyespie/ios-pods-0.10.26
-    paths:
-      - ".github/workflows/build-eyespie-ios-mediapipe-pods.yml"
-      - "distribution/ios/**"
-      - "mediapipe/tasks/cc/genai/inference/c/BUILD"
-      - "mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h"
-      - "mediapipe/tasks/ios/build_ios_framework.sh"
-      - "third_party/zlib.diff"
-      - "third_party/opencv_ios_source.BUILD"
 
 permissions:
   contents: read
