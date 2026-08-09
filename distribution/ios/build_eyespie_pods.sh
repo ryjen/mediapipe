@@ -134,22 +134,19 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 
-# rules_apple emits an inferred-submodule stanza even though these generated
-# framework module maps enumerate headers explicitly and have no umbrella.
-# Clang rejects that combination ("inferred submodules require a module with
-# an umbrella"), which prevents Kotlin/Native cinterop from importing the
-# otherwise valid top-level framework module. Remove only the simple inferred
-# export stanza; retain the explicit header declarations and top-level export.
-if re.search(r"(?m)^\s*(?:umbrella(?:\s+header)?\s+)", text):
-    raise SystemExit(f"{path}: unexpected umbrella module map; normalization is no longer needed")
-
+# rules_apple may emit a simple inferred-submodule stanza. Clang rejects that
+# form when there is no umbrella; Kotlin/Native does not require it even when
+# an umbrella is present. Remove at most that generated stanza and preserve
+# all explicit headers, umbrella declarations, and top-level exports.
 pattern = re.compile(r"\n\s*module\s+\*\s*\{\s*export\s+\*\s*\}\s*", re.MULTILINE)
 matches = pattern.findall(text)
-if len(matches) != 1:
-    raise SystemExit(f"{path}: expected exactly one simple inferred-submodule stanza, found {len(matches)}")
-
-normalized = pattern.sub("\n", text, count=1)
-path.write_text(normalized, encoding="utf-8")
+if len(matches) > 1:
+    raise SystemExit(f"{path}: expected at most one simple inferred-submodule stanza, found {len(matches)}")
+if len(matches) == 1:
+    path.write_text(pattern.sub("\n", text, count=1), encoding="utf-8")
+    print(f"{path}: removed inferred-submodule stanza")
+else:
+    print(f"{path}: no inferred-submodule stanza; unchanged")
 PY
   done < <(find "${temp_root}/frameworks" -path '*.framework/Modules/module.modulemap' -type f -print | sort)
 
