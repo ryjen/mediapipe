@@ -56,15 +56,15 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding='utf-8')
 
-if re.search(r'(?m)^\s*(?:umbrella(?:\s+header)?\s+)', text):
-    raise SystemExit(f'{path}: unexpected umbrella module map; normalization is no longer needed')
-
 pattern = re.compile(r'\n\s*module\s+\*\s*\{\s*export\s+\*\s*\}\s*', re.MULTILINE)
 matches = pattern.findall(text)
-if len(matches) != 1:
-    raise SystemExit(f'{path}: expected exactly one simple inferred-submodule stanza, found {len(matches)}')
-
-path.write_text(pattern.sub('\n', text, count=1), encoding='utf-8')
+if len(matches) > 1:
+    raise SystemExit(f'{path}: expected at most one simple inferred-submodule stanza, found {len(matches)}')
+if len(matches) == 1:
+    path.write_text(pattern.sub('\n', text, count=1), encoding='utf-8')
+    print(f'{path}: removed inferred-submodule stanza')
+else:
+    print(f'{path}: no inferred-submodule stanza; unchanged')
 PY
   done < <(find "${root}/frameworks" -path '*.framework/Modules/module.modulemap' -type f -print | sort)
 
@@ -123,7 +123,7 @@ source_release_tag=${SOURCE_TAG}
 source_distribution_version=${SOURCE_VERSION}
 distribution_commit=$(git rev-parse HEAD)
 distribution_version=${VERSION}
-packaging_change=remove_invalid_inferred_submodules_without_umbrella
+packaging_change=remove_inferred_submodule_stanzas_for_kotlin_cinterop
 binary_payload=identical_to_source_release
 source_common_sha256=f884a5f47e0bbc4c53a7c1b440fb2b21966d0977b2f60ac15f2ce26eadfd8b88
 source_vision_sha256=235352827426693098163a3c95116d78874181f40c57dd6084a6e425d085e087
