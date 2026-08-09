@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-0.10.26.1}"
+VERSION="${VERSION:-0.10.26.2}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 DIST_DIR="${REPO_ROOT}/dist/ios-pods"
 PODSPEC_DIR="${REPO_ROOT}/distribution/ios"
