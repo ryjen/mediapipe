@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-0.10.26.1}"
+VERSION="${VERSION:-0.10.26.2}"
 HERMETIC_PYTHON_VERSION="${HERMETIC_PYTHON_VERSION:-3.12}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 WORK_ROOT="${RUNNER_TEMP:-/tmp}/mediapipe-ios-pods"
@@ -116,6 +116,51 @@ path.write_text(text, encoding="utf-8")
 PY
 }
 
+normalize_framework_modulemaps() {
+  local archive="$1"
+  local temp_root
+  temp_root="$(mktemp -d)"
+
+  tar -xzf "${archive}" -C "${temp_root}"
+
+  local modulemap_count=0
+  while IFS= read -r modulemap; do
+    modulemap_count=$((modulemap_count + 1))
+    python3 - "${modulemap}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+# rules_apple may emit a simple inferred-submodule stanza. Clang rejects that
+# form when there is no umbrella; Kotlin/Native does not require it even when
+# an umbrella is present. Remove at most that generated stanza and preserve
+# all explicit headers, umbrella declarations, and top-level exports.
+pattern = re.compile(r"\n\s*module\s+\*\s*\{\s*export\s+\*\s*\}\s*", re.MULTILINE)
+matches = pattern.findall(text)
+if len(matches) > 1:
+    raise SystemExit(f"{path}: expected at most one simple inferred-submodule stanza, found {len(matches)}")
+if len(matches) == 1:
+    path.write_text(pattern.sub("\n", text, count=1), encoding="utf-8")
+    print(f"{path}: removed inferred-submodule stanza")
+else:
+    print(f"{path}: no inferred-submodule stanza; unchanged")
+PY
+  done < <(find "${temp_root}/frameworks" -path '*.framework/Modules/module.modulemap' -type f -print | sort)
+
+  if (( modulemap_count == 0 )); then
+    echo "No framework module maps found in ${archive}" >&2
+    rm -rf "${temp_root}"
+    return 1
+  fi
+
+  rm -f "${archive}"
+  tar -czf "${archive}" -C "${temp_root}" .
+  rm -rf "${temp_root}"
+}
+
 build_framework() {
   local framework="$1"
   local destination="${WORK_ROOT}/${framework}"
@@ -153,6 +198,7 @@ build_framework() {
     return 1
   fi
 
+  normalize_framework_modulemaps "${archive}"
   cp "${archive}" "${DIST_DIR}/${framework}-${VERSION}.tar.gz"
   df -h
   bazelisk info output_base 2>/dev/null | xargs -I{} du -sh {} 2>/dev/null || true

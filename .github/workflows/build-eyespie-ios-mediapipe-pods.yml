@@ -35,8 +35,10 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 240
     env:
-      VERSION: 0.10.26.1
-      POD_RELEASE_TAG: eyespie-ios-v0.10.26.1
+      VERSION: 0.10.26.2
+      POD_RELEASE_TAG: eyespie-ios-v0.10.26.2
+      SOURCE_VERSION: 0.10.26.1
+      SOURCE_TAG: eyespie-ios-v0.10.26.1
       HOMEBREW_NO_AUTO_UPDATE: "1"
 
     steps:
@@ -64,6 +66,32 @@ jobs:
             exit 1
           fi
 
+      - name: Select build mode
+        id: mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ github.event_name }}" in
+            pull_request) base="${{ github.event.pull_request.base.sha }}" ;;
+            push) base="${{ github.event.before }}" ;;
+            *)
+              echo "mode=build" >> "${GITHUB_OUTPUT}"
+              echo "Manual dispatch uses the full source build path."
+              exit 0
+              ;;
+          esac
+
+          changed="$(git diff --name-only "${base}" HEAD)"
+          printf '%s\n' "${changed}"
+          non_packaging="$(printf '%s\n' "${changed}" | grep -Ev '^(\.github/workflows/build-eyespie-ios-mediapipe-pods\.yml|distribution/ios/.*)$' || true)"
+          if [[ -n "${changed}" && -z "${non_packaging}" ]]; then
+            echo "mode=repackage" >> "${GITHUB_OUTPUT}"
+            echo "Packaging-only change: reuse SHA-pinned ${SOURCE_VERSION} binaries."
+          else
+            echo "mode=build" >> "${GITHUB_OUTPUT}"
+            echo "Source-affecting change: rebuild all frameworks."
+          fi
+
       - name: Select Xcode 16.4
         shell: bash
         run: |
@@ -85,7 +113,15 @@ jobs:
           pod --version
           df -h
 
-      - name: Configure Bazelisk, Python, CMake, and CocoaPods
+      - name: Configure CocoaPods
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v pod >/dev/null || brew install cocoapods
+          pod --version
+
+      - name: Configure Bazelisk, Python, and CMake
+        if: steps.mode.outputs.mode == 'build'
         shell: bash
         run: |
           set -euo pipefail
@@ -93,7 +129,6 @@ jobs:
           {
             set -x
             command -v bazelisk >/dev/null || brew install bazelisk
-            command -v pod >/dev/null || brew install cocoapods
             brew list --versions python@3.11 >/dev/null || brew install python@3.11
 
             tool_bin="${RUNNER_TEMP}/eyespie-tools"
@@ -121,12 +156,17 @@ jobs:
             python3 --version
             python3 -c 'import distutils; print(distutils.__file__)'
             test "$(cmake --version | head -n 1)" = "cmake version 3.24.0"
-            pod --version
           } 2>&1 | tee dist/ios-pods/setup.log
 
       - name: Build Common, Vision, GenAIC, and GenAI
+        if: steps.mode.outputs.mode == 'build'
         shell: bash
         run: bash distribution/ios/build_eyespie_pods.sh
+
+      - name: Repackage validated frameworks
+        if: steps.mode.outputs.mode == 'repackage'
+        shell: bash
+        run: bash distribution/ios/repackage_eyespie_pods.sh
 
       - name: Validate checksums, slices, and module maps
         shell: bash
@@ -149,6 +189,7 @@ jobs:
           python3 - <<'PY'
           import pathlib
           import plistlib
+          import re
           import subprocess
 
           root = pathlib.Path('/tmp/mediapipe-pod-validation')
@@ -182,6 +223,8 @@ jobs:
                   if library.is_dir():
                       module_map = library / 'Modules' / 'module.modulemap'
                       assert module_map.exists(), f'{name}: missing module map {module_map}'
+                      text = module_map.read_text(encoding='utf-8')
+                      assert not re.search(r'(?m)^\s*module\s+\*\s*\{', text), f'{name}: inferred submodule stanza remains in {module_map}'
           PY
 
           assert_arch() {
@@ -229,6 +272,8 @@ jobs:
             dist/ios-pods/build-logs/*.log
             dist/ios-pods/consumer-logs/*.log
             distribution/ios/*.podspec
+            distribution/ios/build_eyespie_pods.sh
+            distribution/ios/repackage_eyespie_pods.sh
             mediapipe/tasks/cc/genai/inference/c/BUILD
             mediapipe/tasks/cc/genai/inference/c/llm_inference_engine_ios.h
             mediapipe/tasks/ios/build_ios_framework.sh
