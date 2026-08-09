@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-0.10.26.1}"
+VERSION="${VERSION:-0.10.26.2}"
 HERMETIC_PYTHON_VERSION="${HERMETIC_PYTHON_VERSION:-3.12}"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 WORK_ROOT="${RUNNER_TEMP:-/tmp}/mediapipe-ios-pods"
