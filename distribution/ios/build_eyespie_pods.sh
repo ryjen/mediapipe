@@ -116,6 +116,54 @@ path.write_text(text, encoding="utf-8")
 PY
 }
 
+normalize_framework_modulemaps() {
+  local archive="$1"
+  local temp_root
+  temp_root="$(mktemp -d)"
+
+  tar -xzf "${archive}" -C "${temp_root}"
+
+  local modulemap_count=0
+  while IFS= read -r modulemap; do
+    modulemap_count=$((modulemap_count + 1))
+    python3 - "${modulemap}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+
+# rules_apple emits an inferred-submodule stanza even though these generated
+# framework module maps enumerate headers explicitly and have no umbrella.
+# Clang rejects that combination ("inferred submodules require a module with
+# an umbrella"), which prevents Kotlin/Native cinterop from importing the
+# otherwise valid top-level framework module. Remove only the simple inferred
+# export stanza; retain the explicit header declarations and top-level export.
+if re.search(r"(?m)^\s*(?:umbrella(?:\s+header)?\s+)", text):
+    raise SystemExit(f"{path}: unexpected umbrella module map; normalization is no longer needed")
+
+pattern = re.compile(r"\n\s*module\s+\*\s*\{\s*export\s+\*\s*\}\s*", re.MULTILINE)
+matches = pattern.findall(text)
+if len(matches) != 1:
+    raise SystemExit(f"{path}: expected exactly one simple inferred-submodule stanza, found {len(matches)}")
+
+normalized = pattern.sub("\n", text, count=1)
+path.write_text(normalized, encoding="utf-8")
+PY
+  done < <(find "${temp_root}/frameworks" -path '*.framework/Modules/module.modulemap' -type f -print | sort)
+
+  if (( modulemap_count == 0 )); then
+    echo "No framework module maps found in ${archive}" >&2
+    rm -rf "${temp_root}"
+    return 1
+  fi
+
+  rm -f "${archive}"
+  tar -czf "${archive}" -C "${temp_root}" .
+  rm -rf "${temp_root}"
+}
+
 build_framework() {
   local framework="$1"
   local destination="${WORK_ROOT}/${framework}"
@@ -153,6 +201,7 @@ build_framework() {
     return 1
   fi
 
+  normalize_framework_modulemaps "${archive}"
   cp "${archive}" "${DIST_DIR}/${framework}-${VERSION}.tar.gz"
   df -h
   bazelisk info output_base 2>/dev/null | xargs -I{} du -sh {} 2>/dev/null || true
